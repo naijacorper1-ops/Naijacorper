@@ -1,7 +1,10 @@
+import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import {
   BedDouble, UtensilsCrossed, Bus, Hospital, Landmark,
-  Printer, ShoppingCart, Pill, Star, MapPin
+  Printer, ShoppingCart, Pill, Star, MapPin,
 } from 'lucide-react'
+import { places } from '../../data/mock'
 
 const CATEGORIES = [
   { label: 'Accommodation', icon: BedDouble },
@@ -14,16 +17,10 @@ const CATEGORIES = [
   { label: 'Markets', icon: ShoppingCart },
 ]
 
-const PLACES = [
-  { name: "Mama's Kitchen", type: 'Affordable food · Bodija', rating: 4.7,
-    note: 'Good portions and cheap. A lot of corps members eat here.' },
-  { name: 'Corper Lodge Bodija', type: 'Accommodation · Ibadan', rating: 4.3,
-    note: 'Shared self-con units. Close to secretariat and the market.' },
-  { name: 'QuickPrint Hub', type: 'Printing · Near camp gate', rating: 4.5,
-    note: 'Fast printing, lamination and passport photos. Open early.' },
-]
-
 export default function Explore() {
+  const [cat, setCat] = useState(null)
+  const shown = cat ? places.filter(p => p.cat === cat) : places
+
   return (
     <div className="page">
       <header className="page__head">
@@ -35,17 +32,21 @@ export default function Explore() {
 
       <div className="cat-grid">
         {CATEGORIES.map(({ label, icon: Icon }) => (
-          <button key={label} className="cat-tile">
+          <button
+            key={label}
+            className={`cat-tile ${cat === label ? 'cat-tile--on' : ''}`}
+            onClick={() => setCat(c => c === label ? null : label)}
+          >
             <span className="cat-tile__icon"><Icon size={22} /></span>
             <span>{label}</span>
           </button>
         ))}
       </div>
 
-      <h2 className="section-title">Recommended by corps members</h2>
+      <h2 className="section-title">{cat ? cat : 'Recommended by corps members'}</h2>
       <div className="place-list">
-        {PLACES.map(p => (
-          <article key={p.name} className="place">
+        {shown.map(p => (
+          <Link key={p.id} to={`/explore/${p.id}`} className="place">
             <div className="place__thumb">{p.name.charAt(0)}</div>
             <div className="place__body">
               <div className="place__top">
@@ -55,8 +56,9 @@ export default function Explore() {
               <span className="place__type">{p.type}</span>
               <p className="place__note">“{p.note}”</p>
             </div>
-          </article>
+          </Link>
         ))}
+        {shown.length === 0 && <div className="empty">No places in this category yet.</div>}
       </div>
     </div>
   )
