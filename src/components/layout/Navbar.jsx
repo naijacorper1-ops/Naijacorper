@@ -18,7 +18,7 @@ export default function Navbar() {
     <header className="navbar">
       <div className="navbar__inner">
         <Link to="/" className="brand">
-          <span className="brand__mark">NC</span>
+          <span className="brand__mark"><img src="/logo.png" alt="NaijaCorper logo" /></span>
           <span className="brand__name">NaijaCorper</span>
         </Link>
 

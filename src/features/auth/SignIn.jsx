@@ -16,7 +16,7 @@ export default function SignIn() {
 
   return (
     <div className="auth">
-      <AuthHero />
+      <AuthHero variant="signup" />
 
       <div className="auth__panel">
         <div className="auth__card">

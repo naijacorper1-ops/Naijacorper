@@ -1,13 +1,31 @@
 /* ================= Auth (Sign in / Sign up) ================= */
 
 .auth {
+  position: relative;
   min-height: 100vh;
   display: grid;
   grid-template-columns: 1.05fr 1fr;
-  background:
-    radial-gradient(1100px 600px at 15% -10%, rgba(30, 140, 95, .55), transparent 60%),
-    linear-gradient(160deg, #0b5e41 0%, #073d29 55%, #04251a 100%);
+  background: #04251a;
+  overflow: hidden;
 }
+/* blurred NYSC photo */
+.auth::before {
+  content: '';
+  position: absolute; inset: -24px;
+  background: url('/nysc-bg.jpg') center / cover no-repeat;
+  filter: blur(6px) brightness(1);
+  transform: scale(1.08);
+  z-index: 0;
+}
+/* green overlay so the form + text stay readable */
+.auth::after {
+  content: '';
+  position: absolute; inset: 0; z-index: 0;
+  background:
+    radial-gradient(1100px 600px at 15% -10%, rgba(30, 140, 95, .25), transparent 60%),
+    linear-gradient(160deg, rgba(11, 94, 65, .62) 0%, rgba(7, 61, 41, .66) 55%, rgba(4, 37, 26, .72) 100%);
+}
+.auth__hero, .auth__panel { position: relative; z-index: 1; }
 
 /* ---- left brand / info panel ---- */
 .auth__hero {
@@ -49,22 +67,42 @@
 .auth__headline h1 span { color: #f2c14e; display: block; }
 .auth__lead { margin-top: 14px; max-width: 440px; font-size: 15px; line-height: 1.6; color: #cfe6da; }
 
-/* placeholder blocks for Vision / Disclaimer / Contact (fill later) */
-.auth__info { position: relative; z-index: 1; margin-top: auto; display: flex; flex-direction: column; gap: 16px; }
+/* vision / disclaimer / contact (sign up) */
+.auth__info { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 12px; }
 .auth__info-block {
   background: rgba(255, 255, 255, .06);
   border: 1px solid rgba(255, 255, 255, .12);
-  border-radius: 16px; padding: 16px 18px;
+  border-radius: 14px; padding: 13px 16px;
 }
 .auth__info-block h3 {
-  font-size: 12px; font-weight: 700; letter-spacing: .8px; text-transform: uppercase;
-  color: #f2c14e; margin-bottom: 6px;
+  font-size: 11px; font-weight: 700; letter-spacing: .8px; text-transform: uppercase;
+  color: #f2c14e; margin-bottom: 5px;
 }
-.auth__info-block p { font-size: 13.5px; line-height: 1.55; color: #d5e8de; }
+.auth__info-block p { font-size: 13px; line-height: 1.5; color: #d5e8de; }
+.auth__contact { display: flex; flex-direction: column; gap: 8px; }
+.auth__contact-item {
+  display: inline-flex; align-items: center; gap: 9px;
+  font-size: 13.5px; font-weight: 500; color: #eaf6ef;
+}
+.auth__contact-item svg { color: #f2c14e; flex: 0 0 auto; }
+.auth__contact-item:hover { color: #fff; text-decoration: underline; }
 
-.auth__stats { display: flex; gap: 30px; position: relative; z-index: 1; }
+/* short feature points */
+.auth__points {
+  position: relative; z-index: 1;
+  list-style: none; display: flex; flex-direction: column; gap: 13px;
+}
+.auth__points li {
+  display: flex; align-items: center; gap: 11px;
+  font-size: 14.5px; color: #dcefe4;
+}
+.auth__points svg { color: #f2c14e; flex: 0 0 auto; }
+
+.auth__stats { display: flex; gap: 30px; position: relative; z-index: 1; margin-top: auto; }
 .auth__stat strong { display: block; font-family: 'Sora', sans-serif; font-size: 24px; color: #fff; }
 .auth__stat span { font-size: 12.5px; color: #b9d4c8; }
+
+.auth__fineprint { position: relative; z-index: 1; font-size: 12px; color: #9fbfb0; }
 
 /* ---- right form panel ---- */
 .auth__panel { display: grid; place-items: center; padding: 40px 24px; }
@@ -134,8 +172,9 @@
 @media (max-width: 900px) {
   .auth { grid-template-columns: 1fr; }
   .auth__hero { padding: 34px 26px; gap: 20px; }
-  .auth__info { display: none; }
+  .auth__points { display: none; }
   .auth__stats { display: none; }
+  .auth__fineprint { display: none; }
   .auth__panel { padding: 26px 18px 44px; }
 }
 @media (max-width: 480px) {

@@ -60,7 +60,7 @@ export default function Onboarding() {
     <div className="onboard">
       <div className="onboard__card">
         <div className="onboard__brand">
-          <span className="brand__mark">NC</span>
+          <span className="brand__mark"><img src="/logo.png" alt="NaijaCorper logo" /></span>
           <span className="brand__name">NaijaCorper</span>
         </div>
 

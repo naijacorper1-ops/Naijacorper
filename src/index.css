@@ -108,7 +108,9 @@ textarea, input { font-family: inherit; }
   width: 38px; height: 38px; border-radius: 11px;
   background: var(--green-600); color: #fff;
   display: grid; place-items: center; font-weight: 700; font-size: 15px;
+  overflow: hidden;
 }
+.brand__mark img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; display: block; }
 .brand__name { font-family: 'Sora', sans-serif; font-size: 19px; font-weight: 700; }
 
 .navbar__search {
