@@ -84,8 +84,8 @@
 
 /* ---------- generic page ---------- */
 .page__head { margin-bottom: 18px; }
-.page__title { font-family: 'Sora', sans-serif; font-size: 26px; }
-.page__sub { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); margin-top: 4px; }
+.page__title { font-family: 'Sora', sans-serif; font-size: 26px; color: #ffffff; }
+.page__sub { display: inline-flex; align-items: center; gap: 6px; color: #bfd8cc; margin-top: 4px; }
 
 .chip-row { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 6px; margin-bottom: 8px; }
 
@@ -149,8 +149,9 @@
 .act--reposted { color: var(--green-600); }
 .act--saved { color: var(--khaki); }
 .cat-tile--on { border-color: var(--green-600); background: var(--green-50); }
-.sidenav__divider { height: 1px; background: var(--border); margin: 10px 8px; }
-.sidenav__link--sub { font-size: 14.5px; padding: 10px 16px; color: var(--muted); }
+.sidenav__divider { height: 1px; background: rgba(255, 255, 255, .18); margin: 10px 8px; }
+.sidenav__link--sub { font-size: 14.5px; padding: 10px 16px; color: #bfd8cc; }
+.sidenav__link--sub:hover { color: #ffffff; }
 .sidenav__assistant { width: 100%; text-align: left; }
 .callout { background: var(--green-50); color: var(--green-700); border-radius: 12px;
   padding: 12px 14px; font-size: 13px; margin-bottom: 16px; }

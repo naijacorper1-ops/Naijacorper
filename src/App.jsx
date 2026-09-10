@@ -1,6 +1,8 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import Layout from './components/layout/Layout'
 import Onboarding from './features/onboarding/Onboarding'
+import SignIn from './features/auth/SignIn'
+import SignUp from './features/auth/SignUp'
 import HomeFeed from './features/home/HomeFeed'
 import Explore from './features/explore/Explore'
 import PlaceDetail from './features/explore/PlaceDetail'
@@ -20,6 +22,8 @@ import './App.css'
 export default function App() {
   return (
     <Routes>
+      <Route path="/signin" element={<SignIn />} />
+      <Route path="/signup" element={<SignUp />} />
       <Route path="/onboarding" element={<Onboarding />} />
 
       <Route element={<Layout />}>

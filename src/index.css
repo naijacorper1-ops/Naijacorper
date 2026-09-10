@@ -5,6 +5,7 @@
   --green-700: #0b5e41;
   --green-50:  #e8f5ef;
   --khaki:     #9a8b57;
+  --gold:      #f2c14e;
   --bg:        #f6f7f5;
   --surface:   #ffffff;
   --border:    #e6e9e4;
@@ -19,7 +20,10 @@
 
 body {
   font-family: 'Inter', system-ui, sans-serif;
-  background: var(--bg);
+  background:
+    radial-gradient(1100px 600px at 15% -10%, rgba(30, 140, 95, .5), transparent 60%),
+    linear-gradient(160deg, #0b5e41 0%, #073d29 55%, #04251a 100%);
+  background-attachment: fixed;
   color: var(--text);
   -webkit-font-smoothing: antialiased;
 }
@@ -83,7 +87,7 @@ textarea, input { font-family: inherit; }
 
 .section-title {
   font-family: 'Sora', sans-serif;
-  font-size: 18px; margin: 26px 0 14px;
+  font-size: 18px; margin: 26px 0 14px; color: #ffffff;
 }
 
 .rating { display: inline-flex; align-items: center; gap: 4px; color: var(--khaki); font-weight: 600; font-size: 13px; }
@@ -124,10 +128,10 @@ textarea, input { font-family: inherit; }
 .sidenav__link {
   display: flex; align-items: center; gap: 14px;
   padding: 12px 16px; border-radius: 999px;
-  font-size: 16px; font-weight: 500; color: var(--text);
-  transition: background .15s;
+  font-size: 16px; font-weight: 500; color: #eaf6ef;
+  transition: background .15s, color .15s;
 }
-.sidenav__link:hover { background: var(--green-50); }
+.sidenav__link:hover { background: rgba(255, 255, 255, .12); color: #ffffff; }
 .sidenav__link.active { background: var(--green-50); color: var(--green-700); font-weight: 700; }
 .sidenav__post { margin-top: 10px; justify-content: center; padding: 13px; }
 
