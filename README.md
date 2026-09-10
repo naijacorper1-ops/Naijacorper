@@ -1,4 +1,4 @@
-# NaijaCorper — Frontend
+# NaijaCorper  Frontend
 
 **The social network for the NYSC journey.**
 
@@ -13,21 +13,21 @@ NaijaCorper connects prospective, serving and former corps members so they can s
 The frontend is organised around six core areas, plus supporting screens.
 
 ### Core areas
-- **Home** — Personalized social feed with For you / Following / National / State tabs, post composer, likes, comments, reposts, quote posts, polls and saves.
-- **Explore** — Discover useful places nearby (accommodation, food, transport, hospitals, ATMs, printing and more) with community recommendations, ratings and tips.
-- **Community** — State/national conversations, trending topics and interest-based groups.
-- **Marketplace** — Buy, sell and rent within the corps community, with categories, a create-listing form and message-seller flow.
-- **Opportunities** — Jobs, internships, scholarships and training, with detail view and apply.
-- **AI Assistant** — An NYSC and service-year helper for common questions (camp, relocation, CDS, documents).
+- **Home**  Personalized social feed with For you / Following / National / State tabs, post composer, likes, comments, reposts, quote posts, polls and saves.
+- **Explore**  Discover useful places nearby (accommodation, food, transport, hospitals, ATMs, printing and more) with community recommendations, ratings and tips.
+- **Community**  State/national conversations, trending topics and interest-based groups.
+- **Marketplace**  Buy, sell and rent within the corps community, with categories, a create-listing form and message-seller flow.
+- **Opportunities** Jobs, internships, scholarships and training, with detail view and apply.
+- **AI Assistant** An NYSC and service-year helper for common questions (camp, relocation, CDS, documents).
 
 ### Supporting screens
-- **Onboarding** — Journey-based flow (preparing / serving / completed) → stage, state, service info, interests, follow suggestions and an optional first post.
-- **Profiles** — Bio, skills, professional info, followers/following, Posts / Replies / Media / About tabs and edit profile.
-- **Post detail** — Full post view with replies.
-- **Messaging** — One-to-one conversations with a chat view.
-- **Notifications** — Likes, comments, follows, messages, opportunities and events.
+- **Onboarding** Journey-based flow (preparing / serving / completed) → stage, state, service info, interests, follow suggestions and an optional first post.
+- **Profiles**  Bio, skills, professional info, followers/following, Posts / Replies / Media / About tabs and edit profile.
+- **Post detail**  Full post view with replies.
+- **Messaging**  One-to-one conversations with a chat view.
+- **Notifications**  Likes, comments, follows, messages, opportunities and events.
 - **Events**, **PPA reviews**, **State guides**, and **Search** (people, posts, places, opportunities).
-- **Content moderation** — Report, mute and block accounts; delete your own posts.
+- **Content moderation** Report, mute and block accounts; delete your own posts.
 
 ---
 
