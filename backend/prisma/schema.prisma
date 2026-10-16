@@ -1,0 +1,473 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  // Supabase's pooled connection (DATABASE_URL) can't run migrations —
+  // the CLI needs the direct, non-pooled connection for that.
+  directUrl = env("DIRECT_URL")
+}
+
+// Matches the PRD's onboarding paths. Prospective is the default
+// until the onboarding module sets the real status.
+enum UserRole {
+  PROSPECTIVE_CORPER
+  SERVING_CORPER
+  EX_CORPER
+  BUSINESS
+  RECRUITER
+  ADMIN
+}
+
+// A badge, not a gate. Users can use the app while unverified.
+enum VerificationStatus {
+  UNVERIFIED
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+// PRD section 7, step 2
+enum NyscStage {
+  WAITING_MOBILIZATION
+  WAITING_CALLUP
+  WAITING_DEPLOYMENT
+  RECEIVED_CALLUP
+  PREPARING_CAMP
+  OTHER
+}
+
+enum OtpPurpose {
+  EMAIL_VERIFICATION
+  PASSWORD_RESET
+}
+
+// PRD section 28
+enum ListingCategory {
+  PHONES
+  LAPTOPS
+  ELECTRONICS
+  FURNITURE
+  FASHION
+  BOOKS
+  KITCHEN_ITEMS
+  VEHICLES
+  ACCOMMODATION
+  SERVICES
+}
+
+enum ListingStatus {
+  AVAILABLE
+  SOLD
+}
+
+enum NotificationType {
+  LIKE
+  COMMENT
+  REPLY
+  FOLLOW
+  MESSAGE
+}
+
+// PRD section 25
+enum ExploreCategory {
+  ACCOMMODATION
+  FOOD
+  RESTAURANTS
+  MAMI_MARKET
+  TRANSPORT
+  HOSPITALS
+  PHARMACIES
+  ATMS
+  CYBERCAFES
+  PRINTING_SERVICES
+  MARKETS
+  NYSC_LOCATIONS
+  ORIENTATION_CAMPS
+  SECRETARIATS
+  PPAS
+  EVENTS
+  OTHER
+}
+
+// PRD section 23
+enum ReportTargetType {
+  POST
+  USER
+}
+
+enum ReportStatus {
+  PENDING
+  REVIEWED
+  DISMISSED
+}
+
+model User {
+  id                 String             @id @default(uuid())
+  email              String             @unique
+  username           String             @unique
+  fullName           String
+  passwordHash       String
+  role               UserRole           @default(PROSPECTIVE_CORPER)
+  verificationStatus VerificationStatus @default(UNVERIFIED)
+  emailVerified      Boolean            @default(false)
+
+  // Onboarding fields, set by the onboarding module (PRD sections 7 and 8)
+  nyscStage           NyscStage?
+  state                String?
+  lga                  String?
+  batch                String?
+  stream               String?
+  ppa                  String?
+  interests            String[] @default([])
+  onboardingCompleted  Boolean  @default(false)
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  refreshTokens         RefreshToken[]
+  verificationDocuments VerificationDocument[]
+  otpCodes              OtpCode[]
+  posts                 Post[]
+  likes                 Like[]
+  comments              Comment[]
+  listings              Listing[]
+  notificationsReceived Notification[]          @relation("NotificationRecipient")
+  notificationsSent     Notification[]          @relation("NotificationActor")
+  notificationPreference NotificationPreference?
+  exploreEntries         ExploreEntry[]
+  reportsFiled           Report[]
+
+  // Same pattern as Follow: two relation names per pair to disambiguate
+  // which side of the block/mute this user is on.
+  blocking  Block[] @relation("UserBlocks")
+  blockedBy Block[] @relation("UserBlockedBy")
+  muting    Mute[]  @relation("UserMutes")
+  mutedBy   Mute[]  @relation("UserMutedBy")
+
+  // Follow is a self-relation: "following" is the edges this user
+  // created, "followers" is the edges pointing at this user.
+  following Follow[] @relation("UserFollows")
+  followers Follow[] @relation("UserFollowedBy")
+
+  // Same normalization pattern as Follow: participantOne/Two is just
+  // an ordering, not "who started it" — see Conversation below.
+  conversationsAsFirstParticipant  Conversation[] @relation("ConversationParticipantOne")
+  conversationsAsSecondParticipant Conversation[] @relation("ConversationParticipantTwo")
+  sentMessages                     Message[]
+
+  @@index([state])
+  @@map("users")
+}
+
+// Refresh tokens are opaque random strings, not JWTs, so a single
+// row can be revoked immediately without needing a blocklist.
+model RefreshToken {
+  id        String   @id @default(uuid())
+  tokenHash String
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  revoked   Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([tokenHash])
+  @@map("refresh_tokens")
+}
+
+// One row per submitted document, so re-submissions keep a history
+// instead of overwriting the last attempt.
+model VerificationDocument {
+  id          String             @id @default(uuid())
+  userId      String
+  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  documentUrl String
+  status      VerificationStatus @default(PENDING)
+  reviewedBy  String?
+  reviewedAt  DateTime?
+  createdAt   DateTime           @default(now())
+
+  @@index([userId])
+  @@map("verification_documents")
+}
+
+// Shared by email verification and password reset — same shape,
+// different purpose. One-time use, hashed, short expiry.
+model OtpCode {
+  id        String     @id @default(uuid())
+  userId    String
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash  String
+  purpose   OtpPurpose
+  expiresAt DateTime
+  consumed  Boolean    @default(false)
+  createdAt DateTime   @default(now())
+
+  @@index([userId, purpose])
+  @@map("otp_codes")
+}
+
+// A repost is a Post row with repostOfId set and no content.
+// A quote post is a Post row with both content and repostOfId set.
+model Post {
+  id       String  @id @default(uuid())
+  authorId String
+  author   User    @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  content  String?
+
+  mediaUrls String[] @default([])
+
+  repostOfId String?
+  repostOf   Post?   @relation("PostReposts", fields: [repostOfId], references: [id], onDelete: SetNull)
+  reposts    Post[]  @relation("PostReposts")
+
+  likeCount    Int @default(0)
+  commentCount Int @default(0)
+  repostCount  Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  likes    Like[]
+  comments Comment[]
+  hashtags PostHashtag[]
+
+  @@index([authorId, createdAt])
+  @@map("posts")
+}
+
+model Like {
+  id        String   @id @default(uuid())
+  userId    String
+  postId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, postId])
+  @@index([postId])
+  @@map("likes")
+}
+
+// Replies are comments with parentId set — one level of nesting,
+// which is all the PRD's "comments and conversations" section asks for.
+model Comment {
+  id       String  @id @default(uuid())
+  postId   String
+  post     Post    @relation(fields: [postId], references: [id], onDelete: Cascade)
+  authorId String
+  author   User    @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  content  String
+
+  parentId String?
+  parent   Comment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies  Comment[] @relation("CommentReplies")
+
+  createdAt DateTime @default(now())
+
+  @@index([postId, createdAt])
+  @@map("comments")
+}
+
+model Follow {
+  id          String @id @default(uuid())
+  followerId  String
+  followingId String
+  follower    User   @relation("UserFollows", fields: [followerId], references: [id], onDelete: Cascade)
+  following   User   @relation("UserFollowedBy", fields: [followingId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([followerId, followingId])
+  @@index([followerId])
+  @@index([followingId])
+  @@map("follows")
+}
+
+model Hashtag {
+  id    String        @id @default(uuid())
+  tag   String        @unique
+  posts PostHashtag[]
+
+  @@map("hashtags")
+}
+
+model PostHashtag {
+  postId    String
+  hashtagId String
+  post      Post    @relation(fields: [postId], references: [id], onDelete: Cascade)
+  hashtag   Hashtag @relation(fields: [hashtagId], references: [id], onDelete: Cascade)
+
+  @@id([postId, hashtagId])
+  @@map("post_hashtags")
+}
+
+// participantOneId is always the lexicographically smaller user id.
+// That normalization, done in MessagingService, is what lets the
+// unique constraint catch (A,B) and (B,A) as the same conversation.
+model Conversation {
+  id               String @id @default(uuid())
+  participantOneId String
+  participantTwoId String
+  participantOne   User   @relation("ConversationParticipantOne", fields: [participantOneId], references: [id], onDelete: Cascade)
+  participantTwo   User   @relation("ConversationParticipantTwo", fields: [participantTwoId], references: [id], onDelete: Cascade)
+
+  lastMessageAt DateTime @default(now())
+  createdAt     DateTime @default(now())
+
+  messages Message[]
+
+  @@unique([participantOneId, participantTwoId])
+  @@index([participantOneId])
+  @@index([participantTwoId])
+  @@map("conversations")
+}
+
+model Message {
+  id             String       @id @default(uuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderId       String
+  sender         User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  content        String
+
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([conversationId, createdAt])
+  @@map("messages")
+}
+
+// Price is a whole-Naira Int — no payment processing happens through
+// the platform for MVP (Marketplace is discovery + messaging, buyer
+// and seller settle payment themselves), so kobo precision isn't needed.
+model Listing {
+  id          String          @id @default(uuid())
+  sellerId    String
+  seller      User            @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  title       String
+  description String
+  price       Int
+  category    ListingCategory
+  status      ListingStatus   @default(AVAILABLE)
+  imageUrls   String[]        @default([])
+  state       String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([category, createdAt])
+  @@index([sellerId])
+  @@index([state])
+  @@map("listings")
+}
+
+// postId/commentId/conversationId are deliberately plain references,
+// not enforced Prisma relations — that would require touching Post,
+// Comment, and Conversation just to add back-relation arrays for this.
+// If the referenced item gets deleted, the notification just goes
+// stale; fine for an activity feed, not worth the extra coupling.
+model Notification {
+  id          String           @id @default(uuid())
+  recipientId String
+  recipient   User             @relation("NotificationRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  actorId     String
+  actor       User             @relation("NotificationActor", fields: [actorId], references: [id], onDelete: Cascade)
+  type        NotificationType
+
+  postId         String?
+  commentId      String?
+  conversationId String?
+
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([recipientId, createdAt])
+  @@index([recipientId, read])
+  @@map("notifications")
+}
+
+model NotificationPreference {
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  likes    Boolean @default(true)
+  comments Boolean @default(true)
+  follows  Boolean @default(true)
+  messages Boolean @default(true)
+
+  @@map("notification_preferences")
+}
+
+// PRD section 27: one rating/tip per entry, from whoever submitted it.
+// Multiple community reviews on the same place is the PRD's own
+// "eventually" — explicitly not MVP scope, not built here.
+model ExploreEntry {
+  id            String          @id @default(uuid())
+  submittedById String
+  submittedBy   User            @relation(fields: [submittedById], references: [id], onDelete: Cascade)
+  name          String
+  category      ExploreCategory
+  description   String
+  state         String
+  rating        Int?
+
+  createdAt DateTime @default(now())
+
+  @@index([category, state])
+  @@index([submittedById])
+  @@map("explore_entries")
+}
+
+// targetId is a plain reference (postId or userId depending on
+// targetType) — same "not a real FK" pattern as Notification, for
+// the same reason: reporting a post shouldn't require touching Post.
+model Report {
+  id         String           @id @default(uuid())
+  reporterId String
+  reporter   User             @relation(fields: [reporterId], references: [id], onDelete: Cascade)
+  targetType ReportTargetType
+  targetId   String
+  reason     String
+  status     ReportStatus     @default(PENDING)
+  reviewedBy String?
+  reviewedAt DateTime?
+  createdAt  DateTime         @default(now())
+
+  @@index([status, createdAt])
+  @@index([reporterId])
+  @@map("reports")
+}
+
+model Block {
+  id        String   @id @default(uuid())
+  blockerId String
+  blockedId String
+  blocker   User     @relation("UserBlocks", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked   User     @relation("UserBlockedBy", fields: [blockedId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([blockerId, blockedId])
+  @@index([blockerId])
+  @@index([blockedId])
+  @@map("blocks")
+}
+
+model Mute {
+  id        String   @id @default(uuid())
+  muterId   String
+  mutedId   String
+  muter     User     @relation("UserMutes", fields: [muterId], references: [id], onDelete: Cascade)
+  muted     User     @relation("UserMutedBy", fields: [mutedId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([muterId, mutedId])
+  @@index([muterId])
+  @@index([mutedId])
+  @@map("mutes")
+}
