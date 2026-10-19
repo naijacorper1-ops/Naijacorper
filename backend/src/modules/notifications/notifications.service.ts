@@ -1,65 +1,89 @@
-import { Injectable } from '@nestjs/common';
-import { NotificationType } from '@prisma/client';
+import { Injectable, Logger } from '@nestjs/common';
+import { NotificationType, Prisma } from '@prisma/client';
+import { DEFAULT_PAGE_SIZE, keysetWhere, sliceWithCursor } from '../../common/utils/pagination';
+import { PUBLIC_USER_SELECT } from '../../common/selects';
 import { PrismaService } from '../../database/prisma.service';
 import { UpdateNotificationPreferencesDto } from './dto/update-notification-preferences.dto';
 
-interface CreateNotificationInput {
+export interface CreateNotificationInput {
   recipientId: string;
-  actorId: string;
+  // Left out for notifications sent by the platform itself.
+  actorId?: string;
   type: NotificationType;
   postId?: string;
   commentId?: string;
   conversationId?: string;
+  listingId?: string;
+  message?: string;
 }
 
 type PreferenceKey = 'likes' | 'comments' | 'follows' | 'messages';
 
-const TYPE_TO_PREFERENCE_KEY: Record<NotificationType, PreferenceKey> = {
+// System notifications (null) are not tied to a user's preferences. A user
+// cannot switch off being told their listing was removed.
+const TYPE_TO_PREFERENCE_KEY: Record<NotificationType, PreferenceKey | null> = {
   LIKE: 'likes',
   COMMENT: 'comments',
   REPLY: 'comments',
   FOLLOW: 'follows',
   MESSAGE: 'messages',
+  VERIFICATION_APPROVED: null,
+  VERIFICATION_REJECTED: null,
+  LISTING_REMOVED: null,
+  CONTENT_REMOVED: null,
 };
 
-const PAGE_SIZE = 30;
+const ACTOR_INCLUDE = { actor: { select: PUBLIC_USER_SELECT } } satisfies Prisma.NotificationInclude;
 
 @Injectable()
 export class NotificationsService {
+  private readonly logger = new Logger(NotificationsService.name);
+
   constructor(private prisma: PrismaService) {}
 
-  // Called by Likes, Comments, Follows, and Messaging — never called
-  // directly from a controller. Silently no-ops for self-actions and
-  // for types the recipient has turned off, so callers don't need to
-  // check either condition themselves.
+  // Called by Likes, Comments, Follows, Messaging and the admin tools, never
+  // directly from a controller. It quietly does nothing for self-actions, for
+  // types the recipient switched off and for repeats, so callers do not have
+  // to check. A notification is a side effect: if it fails, the like or comment
+  // that caused it must still succeed, so errors are logged and swallowed.
   async create(input: CreateNotificationInput) {
-    if (input.recipientId === input.actorId) {
+    try {
+      if (input.actorId && input.recipientId === input.actorId) {
+        return null;
+      }
+
+      if (!(await this.isEnabled(input.recipientId, input.type))) {
+        return null;
+      }
+
+      if (await this.isRepeat(input)) {
+        return null;
+      }
+
+      return await this.prisma.notification.create({
+        data: input,
+        include: ACTOR_INCLUDE,
+      });
+    } catch (error) {
+      this.logger.warn(`Could not create a ${input.type} notification: ${String(error)}`);
       return null;
     }
-
-    if (!(await this.isEnabled(input.recipientId, input.type))) {
-      return null;
-    }
-
-    return this.prisma.notification.create({
-      data: input,
-      include: { actor: { select: { id: true, username: true, fullName: true } } },
-    });
   }
 
-  async findForUser(userId: string, cursor?: string) {
-    const notifications = await this.prisma.notification.findMany({
-      where: { recipientId: userId },
-      take: PAGE_SIZE,
-      ...(cursor && { skip: 1, cursor: { id: cursor } }),
-      orderBy: { createdAt: 'desc' },
-      include: { actor: { select: { id: true, username: true, fullName: true } } },
+  async findForUser(userId: string, cursor?: string, pageSize = DEFAULT_PAGE_SIZE) {
+    const keyset = keysetWhere<Prisma.NotificationWhereInput>(cursor);
+    const where: Prisma.NotificationWhereInput = { recipientId: userId };
+
+    const rows = await this.prisma.notification.findMany({
+      where: keyset ? { AND: [where, keyset] } : where,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: pageSize + 1,
+      include: ACTOR_INCLUDE,
     });
 
-    const nextCursor =
-      notifications.length === PAGE_SIZE ? notifications[notifications.length - 1].id : null;
+    const { items, nextCursor } = sliceWithCursor(rows, pageSize, (n) => n.createdAt);
 
-    return { notifications, nextCursor };
+    return { notifications: items, nextCursor };
   }
 
   async unreadCount(userId: string) {
@@ -71,14 +95,12 @@ export class NotificationsService {
   }
 
   async markRead(userId: string, id: string) {
-    const notification = await this.prisma.notification.findUnique({ where: { id } });
+    const result = await this.prisma.notification.updateMany({
+      where: { id, recipientId: userId },
+      data: { read: true },
+    });
 
-    if (!notification || notification.recipientId !== userId) {
-      return { updated: false };
-    }
-
-    await this.prisma.notification.update({ where: { id }, data: { read: true } });
-    return { updated: true };
+    return { updated: result.count > 0 };
   }
 
   async markAllRead(userId: string) {
@@ -107,15 +129,58 @@ export class NotificationsService {
   }
 
   private async isEnabled(userId: string, type: NotificationType) {
+    const key = TYPE_TO_PREFERENCE_KEY[type];
+
+    if (!key) {
+      return true;
+    }
+
     const preference = await this.prisma.notificationPreference.findUnique({
       where: { userId },
     });
 
-    if (!preference) {
-      return true;
+    return preference ? preference[key] : true;
+  }
+
+  // Liking, unliking and liking again, or following and unfollowing in a loop,
+  // used to create a new notification every time. A like or follow is only
+  // announced once per day by the same person, and a chat only has one unread
+  // "new message" notification per sender.
+  private async isRepeat(input: CreateNotificationInput) {
+    if (!input.actorId) {
+      return false;
     }
 
-    const key = TYPE_TO_PREFERENCE_KEY[type];
-    return preference[key];
+    if (input.type === NotificationType.LIKE || input.type === NotificationType.FOLLOW) {
+      const existing = await this.prisma.notification.findFirst({
+        where: {
+          recipientId: input.recipientId,
+          actorId: input.actorId,
+          type: input.type,
+          postId: input.postId ?? null,
+          createdAt: { gt: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+        },
+        select: { id: true },
+      });
+
+      return !!existing;
+    }
+
+    if (input.type === NotificationType.MESSAGE) {
+      const existing = await this.prisma.notification.findFirst({
+        where: {
+          recipientId: input.recipientId,
+          actorId: input.actorId,
+          type: NotificationType.MESSAGE,
+          conversationId: input.conversationId ?? null,
+          read: false,
+        },
+        select: { id: true },
+      });
+
+      return !!existing;
+    }
+
+    return false;
   }
 }

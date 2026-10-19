@@ -3,6 +3,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  OnModuleInit,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -12,6 +13,7 @@ import * as argon2 from 'argon2';
 import * as crypto from 'crypto';
 import { PrismaService } from '../../database/prisma.service';
 import { MailService } from '../mail/mail.service';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
@@ -19,8 +21,19 @@ import { ResendVerificationDto } from './dto/resend-verification.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
 
+const OTP_LIFETIME_MS = 15 * 60 * 1000;
+const OTP_MAX_ATTEMPTS = 5;
+// A new code for the same person and purpose is not sent more than once a
+// minute, so one victim cannot be flooded with emails from many places.
+const OTP_RESEND_COOLDOWN_MS = 60 * 1000;
+
 @Injectable()
-export class AuthService {
+export class AuthService implements OnModuleInit {
+  // A real argon2 hash of a throwaway password. When a login uses an email we
+  // do not know, we still check the password against this, so the response
+  // takes the same time and nobody can tell which emails have accounts.
+  private dummyHash = '';
+
   constructor(
     private prisma: PrismaService,
     private jwtService: JwtService,
@@ -28,9 +41,19 @@ export class AuthService {
     private mailService: MailService,
   ) {}
 
+  async onModuleInit() {
+    this.dummyHash = await argon2.hash('timing-equaliser-not-a-real-password');
+  }
+
   async register(dto: RegisterDto) {
     const existing = await this.prisma.user.findFirst({
-      where: { OR: [{ email: dto.email }, { username: dto.username }] },
+      where: {
+        OR: [
+          { email: { equals: dto.email, mode: 'insensitive' } },
+          { username: { equals: dto.username, mode: 'insensitive' } },
+        ],
+      },
+      select: { id: true },
     });
 
     if (existing) {
@@ -39,6 +62,9 @@ export class AuthService {
 
     const passwordHash = await argon2.hash(dto.password);
 
+    // If two people submit the same email at the same moment, the database's
+    // unique rule rejects the second one and the global filter turns that
+    // into the same 409 as above.
     const user = await this.prisma.user.create({
       data: {
         email: dto.email,
@@ -50,17 +76,18 @@ export class AuthService {
 
     await this.sendEmailVerification(user.id, user.email);
 
-    return this.issueTokens(user.id, user.role);
+    return this.issueTokens(user.id);
   }
 
   async login(dto: LoginDto) {
-    const user = await this.prisma.user.findUnique({ where: { email: dto.email } });
+    const user = await this.findByEmail(dto.email);
 
     if (!user) {
+      await argon2.verify(this.dummyHash, dto.password).catch(() => false);
       throw new UnauthorizedException('Invalid email or password');
     }
 
-    const passwordValid = await argon2.verify(user.passwordHash, dto.password);
+    const passwordValid = await argon2.verify(user.passwordHash, dto.password).catch(() => false);
 
     if (!passwordValid) {
       throw new UnauthorizedException('Invalid email or password');
@@ -70,56 +97,93 @@ export class AuthService {
       throw new ForbiddenException('This account has been deactivated');
     }
 
-    return this.issueTokens(user.id, user.role);
+    return this.issueTokens(user.id);
   }
 
   async refresh(rawToken: string) {
     const tokenHash = this.hashToken(rawToken);
 
-    const storedToken = await this.prisma.refreshToken.findFirst({
-      where: { tokenHash, revoked: false },
-      include: { user: true },
+    // One atomic step: only the request that flips revoked from false to true
+    // gets a new token. Two requests with the same token at the same moment
+    // can no longer both succeed (the old read-then-update could).
+    const rotated = await this.prisma.refreshToken.updateMany({
+      where: { tokenHash, revoked: false, expiresAt: { gt: new Date() } },
+      data: { revoked: true },
     });
 
-    if (!storedToken || storedToken.expiresAt < new Date()) {
+    if (rotated.count === 0) {
       throw new UnauthorizedException('Refresh token invalid or expired');
     }
 
-    // Rotate on every use: the old token can never be replayed again.
-    await this.prisma.refreshToken.update({
-      where: { id: storedToken.id },
-      data: { revoked: true },
+    const stored = await this.prisma.refreshToken.findFirst({
+      where: { tokenHash },
+      select: { userId: true, user: { select: { isActive: true } } },
     });
 
-    return this.issueTokens(storedToken.userId, storedToken.user.role);
+    // A deactivated user must not be able to keep renewing their session.
+    if (!stored || !stored.user.isActive) {
+      throw new UnauthorizedException('Refresh token invalid or expired');
+    }
+
+    return this.issueTokens(stored.userId);
   }
 
   async logout(rawToken: string) {
-    const tokenHash = this.hashToken(rawToken);
-
     await this.prisma.refreshToken.updateMany({
-      where: { tokenHash },
+      where: { tokenHash: this.hashToken(rawToken) },
       data: { revoked: true },
     });
   }
 
-  async sendEmailVerification(userId: string, email: string) {
-    const code = this.generateOtp();
-
-    await this.prisma.otpCode.create({
-      data: {
-        userId,
-        codeHash: this.hashToken(code),
-        purpose: OtpPurpose.EMAIL_VERIFICATION,
-        expiresAt: this.getOtpExpiryDate(),
-      },
+  // Signs the user out on every device.
+  async logoutAll(userId: string) {
+    await this.prisma.refreshToken.updateMany({
+      where: { userId, revoked: false },
+      data: { revoked: true },
     });
 
-    await this.mailService.sendVerificationEmail(email, code);
+    return { success: true };
+  }
+
+  async changePassword(userId: string, dto: ChangePasswordDto) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, passwordHash: true },
+    });
+
+    if (!user) {
+      throw new UnauthorizedException();
+    }
+
+    const valid = await argon2.verify(user.passwordHash, dto.currentPassword).catch(() => false);
+
+    if (!valid) {
+      throw new BadRequestException('Current password is incorrect');
+    }
+
+    const passwordHash = await argon2.hash(dto.newPassword);
+
+    await this.prisma.user.update({ where: { id: userId }, data: { passwordHash } });
+
+    // Every other device is signed out, this one continues with fresh tokens.
+    await this.prisma.refreshToken.updateMany({
+      where: { userId, revoked: false },
+      data: { revoked: true },
+    });
+
+    return this.issueTokens(userId);
+  }
+
+  async sendEmailVerification(userId: string, email: string) {
+    const code = await this.createOtp(userId, OtpPurpose.EMAIL_VERIFICATION);
+
+    if (code) {
+      await this.mailService.sendVerificationEmail(email, code);
+    }
   }
 
   async verifyEmail(dto: VerifyEmailDto) {
-    const user = await this.prisma.user.findUnique({ where: { email: dto.email } });
+    const user = await this.findByEmail(dto.email);
 
     if (!user) {
       throw new BadRequestException('Invalid email or code');
@@ -136,7 +200,7 @@ export class AuthService {
   }
 
   async resendVerification(dto: ResendVerificationDto) {
-    const user = await this.prisma.user.findUnique({ where: { email: dto.email } });
+    const user = await this.findByEmail(dto.email);
 
     if (user && !user.emailVerified) {
       await this.sendEmailVerification(user.id, user.email);
@@ -146,29 +210,22 @@ export class AuthService {
   }
 
   async forgotPassword(dto: ForgotPasswordDto) {
-    const user = await this.prisma.user.findUnique({ where: { email: dto.email } });
+    const user = await this.findByEmail(dto.email);
 
-    if (user) {
-      const code = this.generateOtp();
+    if (user && user.isActive) {
+      const code = await this.createOtp(user.id, OtpPurpose.PASSWORD_RESET);
 
-      await this.prisma.otpCode.create({
-        data: {
-          userId: user.id,
-          codeHash: this.hashToken(code),
-          purpose: OtpPurpose.PASSWORD_RESET,
-          expiresAt: this.getOtpExpiryDate(),
-        },
-      });
-
-      await this.mailService.sendPasswordResetEmail(user.email, code);
+      if (code) {
+        await this.mailService.sendPasswordResetEmail(user.email, code);
+      }
     }
 
-    // Same message whether or not the email exists — don't leak that.
+    // Same message whether or not the email exists, so it cannot be probed.
     return { message: 'If that email is registered, a reset code is on its way' };
   }
 
   async resetPassword(dto: ResetPasswordDto) {
-    const user = await this.prisma.user.findUnique({ where: { email: dto.email } });
+    const user = await this.findByEmail(dto.email);
 
     if (!user) {
       throw new BadRequestException('Invalid email or code');
@@ -178,12 +235,13 @@ export class AuthService {
 
     const passwordHash = await argon2.hash(dto.newPassword);
 
+    // The code went to this inbox, so using it also proves the email is theirs.
     await this.prisma.user.update({
       where: { id: user.id },
-      data: { passwordHash },
+      data: { passwordHash, emailVerified: true },
     });
 
-    // Password changed — every existing session gets logged out.
+    // Password changed, so every existing session is logged out.
     await this.prisma.refreshToken.updateMany({
       where: { userId: user.id, revoked: false },
       data: { revoked: true },
@@ -192,11 +250,27 @@ export class AuthService {
     return { reset: true };
   }
 
-  private async issueTokens(userId: string, role: string) {
+  // Emails are stored in lowercase. Accounts made before that rule may still
+  // have capital letters, so fall back to a case-insensitive match.
+  private async findByEmail(email: string) {
+    const exact = await this.prisma.user.findUnique({ where: { email } });
+
+    if (exact) {
+      return exact;
+    }
+
+    return this.prisma.user.findFirst({
+      where: { email: { equals: email, mode: 'insensitive' } },
+    });
+  }
+
+  // Access tokens carry only the user id. Role and active status are read from
+  // the database on every request (see JwtStrategy), so they are never stale.
+  private async issueTokens(userId: string) {
     const accessToken = await this.jwtService.signAsync(
-      { sub: userId, role },
+      { sub: userId },
       {
-        secret: this.configService.get<string>('jwt.accessSecret'),
+        secret: this.configService.getOrThrow<string>('jwt.accessSecret'),
         expiresIn: this.configService.get<string>('jwt.accessExpiresIn'),
       },
     );
@@ -211,44 +285,104 @@ export class AuthService {
       },
     });
 
+    // Housekeeping: expired tokens are of no use to anyone.
+    await this.prisma.refreshToken.deleteMany({
+      where: { userId, expiresAt: { lt: new Date() } },
+    });
+
     return { accessToken, refreshToken };
   }
 
-  // Refresh tokens are opaque, not JWTs, so we hash them the same way
-  // a password reset token would be hashed before storing.
+  // Refresh tokens and codes are hashed before storing, so a leaked
+  // database does not leak working tokens.
   private hashToken(token: string) {
     return crypto.createHash('sha256').update(token).digest('hex');
   }
 
   private getRefreshExpiryDate() {
     const days = this.configService.getOrThrow<number>('jwt.refreshExpiresInDays');
-    const date = new Date();
-    date.setDate(date.getDate() + days);
-    return date;
+    return new Date(Date.now() + days * 24 * 60 * 60 * 1000);
   }
 
-  private generateOtp() {
-    return Math.floor(100000 + Math.random() * 900000).toString();
-  }
+  // Returns the plain code, or null when one was sent less than a minute ago.
+  private async createOtp(userId: string, purpose: OtpPurpose): Promise<string | null> {
+    const latest = await this.prisma.otpCode.findFirst({
+      where: { userId, purpose, consumed: false },
+      orderBy: { createdAt: 'desc' },
+      select: { createdAt: true },
+    });
 
-  private getOtpExpiryDate() {
-    return new Date(Date.now() + 15 * 60 * 1000);
+    if (latest && Date.now() - latest.createdAt.getTime() < OTP_RESEND_COOLDOWN_MS) {
+      return null;
+    }
+
+    // crypto.randomInt is a proper random source. Math.random is guessable.
+    const code = crypto.randomInt(100000, 1000000).toString();
+
+    // Only the newest code works, and old finished ones are cleaned out.
+    await this.prisma.otpCode.deleteMany({
+      where: {
+        userId,
+        purpose,
+        OR: [{ consumed: true }, { expiresAt: { lt: new Date() } }],
+      },
+    });
+    await this.prisma.otpCode.updateMany({
+      where: { userId, purpose, consumed: false },
+      data: { consumed: true },
+    });
+
+    await this.prisma.otpCode.create({
+      data: {
+        userId,
+        codeHash: this.hashToken(code),
+        purpose,
+        expiresAt: new Date(Date.now() + OTP_LIFETIME_MS),
+      },
+    });
+
+    return code;
   }
 
   private async consumeOtp(userId: string, code: string, purpose: OtpPurpose) {
-    const codeHash = this.hashToken(code);
-
     const otp = await this.prisma.otpCode.findFirst({
-      where: { userId, purpose, codeHash, consumed: false },
+      where: { userId, purpose, consumed: false },
+      orderBy: { createdAt: 'desc' },
     });
 
-    if (!otp || otp.expiresAt < new Date()) {
+    if (!otp || otp.expiresAt < new Date() || otp.attempts >= OTP_MAX_ATTEMPTS) {
       throw new BadRequestException('Invalid or expired code');
     }
 
-    await this.prisma.otpCode.update({
-      where: { id: otp.id },
+    // Every guess uses up one of the 5 attempts BEFORE the code is compared,
+    // in one atomic step. Checking and counting separately would let many
+    // guesses sent at the same instant all slip through before the count rose.
+    const claimed = await this.prisma.otpCode.updateMany({
+      where: { id: otp.id, consumed: false, attempts: { lt: OTP_MAX_ATTEMPTS } },
+      data: { attempts: { increment: 1 } },
+    });
+
+    if (claimed.count === 0) {
+      throw new BadRequestException('Invalid or expired code');
+    }
+
+    const given = Buffer.from(this.hashToken(code), 'hex');
+    const expected = Buffer.from(otp.codeHash, 'hex');
+    const matches = given.length === expected.length && crypto.timingSafeEqual(given, expected);
+
+    if (!matches) {
+      throw new BadRequestException('Invalid or expired code');
+    }
+
+    // Marking it used is the single step that decides who wins if the same
+    // correct code arrives twice at once.
+    const used = await this.prisma.otpCode.updateMany({
+      where: { id: otp.id, consumed: false },
       data: { consumed: true },
     });
+
+    if (used.count === 0) {
+      throw new BadRequestException('Invalid or expired code');
+    }
   }
 }

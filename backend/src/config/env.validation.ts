@@ -62,5 +62,11 @@ export function validate(config: Record<string, unknown>) {
     throw new Error(errors.toString());
   }
 
+  // A short secret can be guessed, and anyone who guesses it can sign
+  // tokens for any account (including an admin). Production refuses to start.
+  if (validatedConfig.NODE_ENV === Environment.Production && validatedConfig.JWT_ACCESS_SECRET.length < 32) {
+    throw new Error('JWT_ACCESS_SECRET must be at least 32 characters long in production');
+  }
+
   return validatedConfig;
 }

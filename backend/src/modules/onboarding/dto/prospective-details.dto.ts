@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { NyscStage } from '@prisma/client';
-import { IsArray, IsIn, IsOptional, IsString } from 'class-validator';
+import { ArrayUnique, IsArray, IsIn, IsOptional } from 'class-validator';
+import { NigerianState } from '../../../common/validators/nigerian-state.validator';
 import { PROSPECTIVE_INTERESTS } from '../constants/interests';
 
 export class ProspectiveDetailsDto {
@@ -10,10 +11,11 @@ export class ProspectiveDetailsDto {
 
   // Optional: PRD allows "I don't know yet" for expected state
   @IsOptional()
-  @IsString()
+  @NigerianState()
   state?: string;
 
   @IsArray()
+  @ArrayUnique()
   @IsIn(PROSPECTIVE_INTERESTS, { each: true })
   interests: string[];
 }
