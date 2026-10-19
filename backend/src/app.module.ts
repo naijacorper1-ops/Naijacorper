@@ -1,17 +1,22 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { RejectNullBytesMiddleware } from './common/middleware/reject-null-bytes.middleware';
+import { PrismaExceptionFilter } from './common/filters/prisma-exception.filter';
 import configuration from './config/configuration';
 import { validate } from './config/env.validation';
 import { PrismaModule } from './database/prisma.module';
 import { HealthModule } from './health/health.module';
 import { AdminModule } from './modules/admin/admin.module';
+import { AuditModule } from './modules/audit/audit.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { CommentsModule } from './modules/comments/comments.module';
 import { ExploreModule } from './modules/explore/explore.module';
 import { FeedModule } from './modules/feed/feed.module';
 import { FollowsModule } from './modules/follows/follows.module';
+import { GroupsModule } from './modules/groups/groups.module';
+import { HashtagsModule } from './modules/hashtags/hashtags.module';
 import { LikesModule } from './modules/likes/likes.module';
 import { MarketplaceModule } from './modules/marketplace/marketplace.module';
 import { MessagingModule } from './modules/messaging/messaging.module';
@@ -47,6 +52,9 @@ import { UsersModule } from './modules/users/users.module';
     NotificationsModule,
     ExploreModule,
     ModerationModule,
+    GroupsModule,
+    HashtagsModule,
+    AuditModule,
     AdminModule,
   ],
   providers: [
@@ -54,6 +62,15 @@ import { UsersModule } from './modules/users/users.module';
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
     },
+    // Turns database errors (duplicates, missing rows) into proper 4xx replies.
+    {
+      provide: APP_FILTER,
+      useClass: PrismaExceptionFilter,
+    },
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(RejectNullBytesMiddleware).forRoutes('*');
+  }
+}

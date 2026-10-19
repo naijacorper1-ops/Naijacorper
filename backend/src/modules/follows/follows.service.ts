@@ -4,8 +4,9 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { NotificationType } from '@prisma/client';
+import { NotificationType, Prisma } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
+import { ModerationService } from '../moderation/moderation.service';
 import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
@@ -13,6 +14,7 @@ export class FollowsService {
   constructor(
     private prisma: PrismaService,
     private notificationsService: NotificationsService,
+    private moderationService: ModerationService,
   ) {}
 
   async follow(followerId: string, followingId: string) {
@@ -20,21 +22,25 @@ export class FollowsService {
       throw new BadRequestException('You cannot follow yourself');
     }
 
-    const target = await this.prisma.user.findUnique({ where: { id: followingId } });
+    const target = await this.prisma.user.findUnique({
+      where: { id: followingId },
+      select: { id: true, isActive: true },
+    });
 
-    if (!target) {
+    if (!target || !target.isActive) {
       throw new NotFoundException('User not found');
     }
 
-    const existing = await this.prisma.follow.findUnique({
-      where: { followerId_followingId: { followerId, followingId } },
-    });
+    await this.moderationService.assertNotBlocked(followerId, followingId);
 
-    if (existing) {
-      throw new ConflictException('Already following this user');
+    try {
+      await this.prisma.follow.create({ data: { followerId, followingId } });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ConflictException('Already following this user');
+      }
+      throw error;
     }
-
-    await this.prisma.follow.create({ data: { followerId, followingId } });
 
     await this.notificationsService.create({
       recipientId: followingId,
@@ -46,14 +52,7 @@ export class FollowsService {
   }
 
   async unfollow(followerId: string, followingId: string) {
-    const existing = await this.prisma.follow.findUnique({
-      where: { followerId_followingId: { followerId, followingId } },
-    });
-
-    if (existing) {
-      await this.prisma.follow.delete({ where: { id: existing.id } });
-    }
-
+    await this.prisma.follow.deleteMany({ where: { followerId, followingId } });
     return { following: false };
   }
 }

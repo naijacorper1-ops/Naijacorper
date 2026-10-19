@@ -1,10 +1,14 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { PUBLIC_USER_SELECT } from '../../common/selects';
+import { DEFAULT_PAGE_SIZE, keysetWhere, sliceWithCursor } from '../../common/utils/pagination';
 import { PrismaService } from '../../database/prisma.service';
 import { CreateExploreEntryDto } from './dto/create-explore-entry.dto';
 import { QueryExploreEntriesDto } from './dto/query-explore-entries.dto';
 
-const PAGE_SIZE = 20;
+const INCLUDE = {
+  submittedBy: { select: PUBLIC_USER_SELECT },
+} satisfies Prisma.ExploreEntryInclude;
 
 @Injectable()
 export class ExploreService {
@@ -15,7 +19,7 @@ export class ExploreService {
 
     if (!state) {
       throw new BadRequestException(
-        'State is required — set it in your profile or include it in this request',
+        'State is required, set it in your profile or include it in this request',
       );
     }
 
@@ -28,33 +32,42 @@ export class ExploreService {
         state,
         rating: dto.rating,
       },
-      include: this.include(),
+      include: INCLUDE,
     });
   }
 
   async findAll(query: QueryExploreEntriesDto) {
+    const pageSize = query.pageSize ?? DEFAULT_PAGE_SIZE;
+    const keyset = keysetWhere<Prisma.ExploreEntryWhereInput>(query.cursor);
+
     const where: Prisma.ExploreEntryWhereInput = {
+      submittedBy: { isActive: true },
       ...(query.category && { category: query.category }),
-      ...(query.state && { state: query.state }),
+      ...(query.state && { state: { equals: query.state, mode: 'insensitive' } }),
+      ...(query.q && {
+        OR: [
+          { name: { contains: query.q, mode: 'insensitive' } },
+          { description: { contains: query.q, mode: 'insensitive' } },
+        ],
+      }),
     };
 
-    const entries = await this.prisma.exploreEntry.findMany({
-      where,
-      take: PAGE_SIZE,
-      ...(query.cursor && { skip: 1, cursor: { id: query.cursor } }),
-      orderBy: { createdAt: 'desc' },
-      include: this.include(),
+    const rows = await this.prisma.exploreEntry.findMany({
+      where: keyset ? { AND: [where, keyset] } : where,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: pageSize + 1,
+      include: INCLUDE,
     });
 
-    const nextCursor = entries.length === PAGE_SIZE ? entries[entries.length - 1].id : null;
+    const { items, nextCursor } = sliceWithCursor(rows, pageSize, (e) => e.createdAt);
 
-    return { entries, nextCursor };
+    return { entries: items, nextCursor };
   }
 
   async findById(id: string) {
-    const entry = await this.prisma.exploreEntry.findUnique({
-      where: { id },
-      include: this.include(),
+    const entry = await this.prisma.exploreEntry.findFirst({
+      where: { id, submittedBy: { isActive: true } },
+      include: INCLUDE,
     });
 
     if (!entry) {
@@ -64,16 +77,30 @@ export class ExploreService {
     return entry;
   }
 
-  private async getSubmitterState(userId: string) {
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    return user?.state ?? null;
+  async deleteOwn(userId: string, id: string) {
+    const entry = await this.prisma.exploreEntry.findUnique({
+      where: { id },
+      select: { submittedById: true },
+    });
+
+    if (!entry) {
+      throw new NotFoundException('Explore entry not found');
+    }
+
+    if (entry.submittedById !== userId) {
+      throw new ForbiddenException('You can only delete your own entries');
+    }
+
+    await this.prisma.exploreEntry.delete({ where: { id } });
+    return { success: true };
   }
 
-  private include() {
-    return {
-      submittedBy: {
-        select: { id: true, username: true, fullName: true },
-      },
-    };
+  private async getSubmitterState(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { state: true },
+    });
+
+    return user?.state ?? null;
   }
 }

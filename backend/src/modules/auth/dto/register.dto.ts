@@ -1,21 +1,24 @@
-import { IsEmail, IsString, Matches, MinLength } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { IsEmail, IsString, MaxLength, MinLength } from 'class-validator';
+import { normalizeEmail, trim } from '../../../common/transforms';
+import { Username } from '../../../common/validators/username.validator';
+import { NewPassword } from './password';
 
 export class RegisterDto {
+  @Transform(normalizeEmail)
   @IsEmail()
+  @MaxLength(254)
   email: string;
 
-  @IsString()
-  @MinLength(3)
+  @Username()
   username: string;
 
+  @Transform(trim)
   @IsString()
   @MinLength(2)
+  @MaxLength(80)
   fullName: string;
 
-  @IsString()
-  @MinLength(8)
-  @Matches(/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/, {
-    message: 'Password must contain an uppercase letter, a lowercase letter, and a number',
-  })
+  @NewPassword()
   password: string;
 }

@@ -1,8 +1,22 @@
-import { Body, Controller, HttpCode, HttpStatus, Post, Req, Res, UnauthorizedException } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  HttpCode,
+  HttpStatus,
+  Post,
+  Req,
+  Res,
+  UnauthorizedException,
+  UseGuards,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Throttle } from '@nestjs/throttler';
 import { Request, Response } from 'express';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { AuthUser } from '../../common/types/auth-user';
 import { AuthService } from './auth.service';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
@@ -41,7 +55,7 @@ export class AuthController {
   async refresh(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const rawToken = req.cookies?.[REFRESH_COOKIE_NAME];
 
-    if (!rawToken) {
+    if (!rawToken || typeof rawToken !== 'string') {
       throw new UnauthorizedException('No refresh token provided');
     }
 
@@ -55,12 +69,36 @@ export class AuthController {
   async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const rawToken = req.cookies?.[REFRESH_COOKIE_NAME];
 
-    if (rawToken) {
+    if (rawToken && typeof rawToken === 'string') {
       await this.authService.logout(rawToken);
     }
 
-    res.clearCookie(REFRESH_COOKIE_NAME, { path: '/api/v1/auth' });
+    this.clearRefreshCookie(res);
     return { success: true };
+  }
+
+  // Sign out of every device, for example after a lost phone.
+  @Post('logout-all')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(JwtAuthGuard)
+  async logoutAll(@CurrentUser() user: AuthUser, @Res({ passthrough: true }) res: Response) {
+    await this.authService.logoutAll(user.id);
+    this.clearRefreshCookie(res);
+    return { success: true };
+  }
+
+  @Post('change-password')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  async changePassword(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: ChangePasswordDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const { accessToken, refreshToken } = await this.authService.changePassword(user.id, dto);
+    this.setRefreshCookie(res, refreshToken);
+    return { accessToken };
   }
 
   @Post('verify-email')
@@ -91,16 +129,31 @@ export class AuthController {
     return this.authService.resetPassword(dto);
   }
 
-  private setRefreshCookie(res: Response, refreshToken: string) {
+  private cookieOptions() {
     const isProduction = this.configService.get<string>('nodeEnv') === 'production';
 
-    res.cookie(REFRESH_COOKIE_NAME, refreshToken, {
+    return {
       httpOnly: true,
       secure: isProduction,
-      sameSite: isProduction ? 'none' : 'lax',
+      sameSite: (isProduction ? 'none' : 'lax') as 'none' | 'lax',
       domain: this.configService.get<string>('cookie.domain'),
       path: '/api/v1/auth',
-      maxAge: 1000 * 60 * 60 * 24 * 30,
+    };
+  }
+
+  private setRefreshCookie(res: Response, refreshToken: string) {
+    const days = this.configService.getOrThrow<number>('jwt.refreshExpiresInDays');
+
+    res.cookie(REFRESH_COOKIE_NAME, refreshToken, {
+      ...this.cookieOptions(),
+      maxAge: 1000 * 60 * 60 * 24 * days,
     });
+  }
+
+  // The cookie must be cleared with the same domain, path and flags it was
+  // set with, otherwise the browser keeps it. The old logout left out the
+  // domain, so the cookie was never actually removed in production.
+  private clearRefreshCookie(res: Response) {
+    res.clearCookie(REFRESH_COOKIE_NAME, this.cookieOptions());
   }
 }

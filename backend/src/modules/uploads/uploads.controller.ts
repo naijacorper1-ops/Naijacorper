@@ -1,18 +1,9 @@
-import {
-  Controller,
-  FileTypeValidator,
-  MaxFileSizeValidator,
-  ParseFilePipe,
-  Post,
-  UploadedFile,
-  UseGuards,
-  UseInterceptors,
-} from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { Controller, Post, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { VerifiedEmailGuard } from '../../common/guards/verified-email.guard';
+import { upload } from './upload-interceptor';
 import { UploadsService } from './uploads.service';
-
-const MAX_FILE_SIZE = 15 * 1024 * 1024;
 
 @UseGuards(JwtAuthGuard)
 @Controller('uploads')
@@ -20,36 +11,19 @@ export class UploadsController {
   constructor(private uploadsService: UploadsService) {}
 
   @Post('post-media')
-  @UseInterceptors(FileInterceptor('file'))
-  uploadPostMedia(
-    @UploadedFile(
-      new ParseFilePipe({
-        validators: [
-          new MaxFileSizeValidator({ maxSize: MAX_FILE_SIZE }),
-          new FileTypeValidator({
-            fileType: /^(image\/(jpeg|png|gif|webp)|video\/(mp4|quicktime))$/,
-          }),
-        ],
-      }),
-    )
-    file: Express.Multer.File,
-  ) {
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
+  @UseInterceptors(upload(15))
+  uploadPostMedia(@UploadedFile() file: Express.Multer.File) {
     return this.uploadsService.uploadPostMedia(file);
   }
 
-  @Post('verification-document')
-  @UseInterceptors(FileInterceptor('file'))
-  uploadVerificationDocument(
-    @UploadedFile(
-      new ParseFilePipe({
-        validators: [
-          new MaxFileSizeValidator({ maxSize: MAX_FILE_SIZE }),
-          new FileTypeValidator({ fileType: /^(image\/(jpeg|png|webp)|application\/pdf)$/ }),
-        ],
-      }),
-    )
-    file: Express.Multer.File,
-  ) {
-    return this.uploadsService.uploadVerificationDocument(file);
+  // Only accounts with a verified email can sell, so only they can upload
+  // listing photos.
+  @Post('listing-image')
+  @UseGuards(VerifiedEmailGuard)
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
+  @UseInterceptors(upload(8))
+  uploadListingImage(@UploadedFile() file: Express.Multer.File) {
+    return this.uploadsService.uploadListingImage(file);
   }
 }

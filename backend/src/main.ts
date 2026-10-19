@@ -5,6 +5,8 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
+import { CorsIoAdapter } from './common/adapters/cors-io.adapter';
+import { improveApiDocument } from './docs/api-docs';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -16,13 +18,23 @@ async function bootstrap() {
     app.getHttpAdapter().getInstance().set('trust proxy', 1);
   }
 
+  // Lets the app close its database connections cleanly when Render stops
+  // the old instance during a deploy.
+  app.enableShutdownHooks();
+
   app.use(helmet());
   app.use(cookieParser());
 
+  // FRONTEND_URL can list several addresses separated by commas.
+  const origins = configService.getOrThrow<string[]>('cors.origins');
+
   app.enableCors({
-    origin: configService.get<string>('cors.origin'),
+    origin: origins,
     credentials: true,
   });
+
+  // Same list for the real-time messaging connection.
+  app.useWebSocketAdapter(new CorsIoAdapter(app, origins));
 
   app.useGlobalPipes(
     new ValidationPipe({
@@ -55,7 +67,13 @@ async function bootstrap() {
     }
   }
 
-  SwaggerModule.setup('api/docs', app, document);
+  // Descriptions, upload forms and error answers for the API page.
+  improveApiDocument(document);
+
+  // persistAuthorization keeps the pasted token after a page refresh.
+  SwaggerModule.setup('api/docs', app, document, {
+    swaggerOptions: { persistAuthorization: true },
+  });
 
   const port = configService.getOrThrow<number>('port');
   await app.listen(port);

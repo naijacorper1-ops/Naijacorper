@@ -58,9 +58,12 @@ enum ListingCategory {
   SERVICES
 }
 
+// REMOVED is set only by an admin (moderation). Sellers can't set it,
+// and can't edit or re-list a REMOVED listing.
 enum ListingStatus {
   AVAILABLE
   SOLD
+  REMOVED
 }
 
 enum NotificationType {
@@ -69,6 +72,12 @@ enum NotificationType {
   REPLY
   FOLLOW
   MESSAGE
+  // System notifications: sent by the platform, not by another user,
+  // so they have no actor and ignore the user's preferences.
+  VERIFICATION_APPROVED
+  VERIFICATION_REJECTED
+  LISTING_REMOVED
+  CONTENT_REMOVED
 }
 
 // PRD section 25
@@ -96,12 +105,28 @@ enum ExploreCategory {
 enum ReportTargetType {
   POST
   USER
+  COMMENT
+  LISTING
+  GROUP
 }
 
 enum ReportStatus {
   PENDING
   REVIEWED
   DISMISSED
+}
+
+// What the user is showing us to prove their NYSC status.
+enum VerificationDocumentType {
+  NYSC_ID_CARD
+  CALL_UP_LETTER
+  DISCHARGE_CERTIFICATE
+  OTHER
+}
+
+enum GroupMemberRole {
+  OWNER
+  MEMBER
 }
 
 model User {
@@ -112,31 +137,38 @@ model User {
   passwordHash       String
   role               UserRole           @default(PROSPECTIVE_CORPER)
   verificationStatus VerificationStatus @default(UNVERIFIED)
+  // The only verification field other users ever see. It is true only for
+  // VERIFIED, so a rejected or pending request is never exposed publicly.
+  isVerified         Boolean            @default(false)
   emailVerified      Boolean            @default(false)
+
+  // Public profile
+  bio       String?
+  avatarUrl String?
 
   // Onboarding fields, set by the onboarding module (PRD sections 7 and 8)
   nyscStage           NyscStage?
-  state                String?
-  lga                  String?
-  batch                String?
-  stream               String?
-  ppa                  String?
-  interests            String[] @default([])
-  onboardingCompleted  Boolean  @default(false)
+  state               String?
+  lga                 String?
+  batch               String?
+  stream              String?
+  ppa                 String?
+  interests           String[]   @default([])
+  onboardingCompleted Boolean    @default(false)
 
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  refreshTokens         RefreshToken[]
-  verificationDocuments VerificationDocument[]
-  otpCodes              OtpCode[]
-  posts                 Post[]
-  likes                 Like[]
-  comments              Comment[]
-  listings              Listing[]
-  notificationsReceived Notification[]          @relation("NotificationRecipient")
-  notificationsSent     Notification[]          @relation("NotificationActor")
+  refreshTokens          RefreshToken[]
+  verificationDocuments  VerificationDocument[]
+  otpCodes               OtpCode[]
+  posts                  Post[]
+  likes                  Like[]
+  comments               Comment[]
+  listings               Listing[]
+  notificationsReceived  Notification[]          @relation("NotificationRecipient")
+  notificationsSent      Notification[]          @relation("NotificationActor")
   notificationPreference NotificationPreference?
   exploreEntries         ExploreEntry[]
   reportsFiled           Report[]
@@ -159,7 +191,12 @@ model User {
   conversationsAsSecondParticipant Conversation[] @relation("ConversationParticipantTwo")
   sentMessages                     Message[]
 
+  pollVotes        PollVote[]
+  groupsCreated    Group[]       @relation("GroupCreator")
+  groupMemberships GroupMember[]
+
   @@index([state])
+  @@index([createdAt])
   @@map("users")
 }
 
@@ -182,16 +219,28 @@ model RefreshToken {
 // One row per submitted document, so re-submissions keep a history
 // instead of overwriting the last attempt.
 model VerificationDocument {
-  id          String             @id @default(uuid())
-  userId      String
-  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  documentUrl String
-  status      VerificationStatus @default(PENDING)
-  reviewedBy  String?
-  reviewedAt  DateTime?
-  createdAt   DateTime           @default(now())
+  id              String                   @id @default(uuid())
+  userId          String
+  user            User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  documentType    VerificationDocumentType @default(OTHER)
+  // The private Cloudinary file. We store its id, never a link, and
+  // generate a fresh short-lived link whenever an admin opens it.
+  // These are cleared (and the file deleted) once a decision is made.
+  publicId        String?
+  resourceType    String?
+  format          String?
+  purgedAt        DateTime?
+  // Old rows from before this change only have a (now expired) link.
+  documentUrl     String?
+  note            String?
+  status          VerificationStatus       @default(PENDING)
+  rejectionReason String?
+  reviewedBy      String?
+  reviewedAt      DateTime?
+  createdAt       DateTime                 @default(now())
 
   @@index([userId])
+  @@index([status, createdAt])
   @@map("verification_documents")
 }
 
@@ -205,6 +254,8 @@ model OtpCode {
   purpose   OtpPurpose
   expiresAt DateTime
   consumed  Boolean    @default(false)
+  // Wrong guesses against this code. After 5 the code is dead.
+  attempts  Int        @default(0)
   createdAt DateTime   @default(now())
 
   @@index([userId, purpose])
@@ -225,6 +276,11 @@ model Post {
   repostOf   Post?   @relation("PostReposts", fields: [repostOfId], references: [id], onDelete: SetNull)
   reposts    Post[]  @relation("PostReposts")
 
+  // A post written inside a group. Group posts stay out of the main
+  // feed, profiles and hashtag pages; they show up in the group only.
+  groupId String?
+  group   Group?  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
   likeCount    Int @default(0)
   commentCount Int @default(0)
   repostCount  Int @default(0)
@@ -235,8 +291,12 @@ model Post {
   likes    Like[]
   comments Comment[]
   hashtags PostHashtag[]
+  poll     Poll?
 
   @@index([authorId, createdAt])
+  @@index([createdAt, id])
+  @@index([groupId, createdAt])
+  @@index([repostOfId])
   @@map("posts")
 }
 
@@ -256,11 +316,11 @@ model Like {
 // Replies are comments with parentId set — one level of nesting,
 // which is all the PRD's "comments and conversations" section asks for.
 model Comment {
-  id       String  @id @default(uuid())
+  id       String @id @default(uuid())
   postId   String
-  post     Post    @relation(fields: [postId], references: [id], onDelete: Cascade)
+  post     Post   @relation(fields: [postId], references: [id], onDelete: Cascade)
   authorId String
-  author   User    @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  author   User   @relation(fields: [authorId], references: [id], onDelete: Cascade)
   content  String
 
   parentId String?
@@ -270,6 +330,7 @@ model Comment {
   createdAt DateTime @default(now())
 
   @@index([postId, createdAt])
+  @@index([parentId])
   @@map("comments")
 }
 
@@ -303,6 +364,7 @@ model PostHashtag {
   hashtag   Hashtag @relation(fields: [hashtagId], references: [id], onDelete: Cascade)
 
   @@id([postId, hashtagId])
+  @@index([hashtagId])
   @@map("post_hashtags")
 }
 
@@ -357,11 +419,17 @@ model Listing {
   imageUrls   String[]        @default([])
   state       String?
 
+  // Set when an admin removes the listing. The seller can see why.
+  removedReason String?
+  removedAt     DateTime?
+  removedBy     String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([category, createdAt])
-  @@index([sellerId])
+  @@index([sellerId, createdAt])
+  @@index([status, createdAt])
   @@index([state])
   @@map("listings")
 }
@@ -375,13 +443,17 @@ model Notification {
   id          String           @id @default(uuid())
   recipientId String
   recipient   User             @relation("NotificationRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
-  actorId     String
-  actor       User             @relation("NotificationActor", fields: [actorId], references: [id], onDelete: Cascade)
+  // Null for system notifications (verification result, content removed).
+  actorId     String?
+  actor       User?            @relation("NotificationActor", fields: [actorId], references: [id], onDelete: Cascade)
   type        NotificationType
 
   postId         String?
   commentId      String?
   conversationId String?
+  listingId      String?
+  // Human-readable text for system notifications, e.g. a rejection reason.
+  message        String?
 
   read      Boolean  @default(false)
   createdAt DateTime @default(now())
@@ -421,6 +493,7 @@ model ExploreEntry {
 
   @@index([category, state])
   @@index([submittedById])
+  @@index([createdAt, id])
   @@map("explore_entries")
 }
 
@@ -428,19 +501,26 @@ model ExploreEntry {
 // targetType) — same "not a real FK" pattern as Notification, for
 // the same reason: reporting a post shouldn't require touching Post.
 model Report {
-  id         String           @id @default(uuid())
-  reporterId String
-  reporter   User             @relation(fields: [reporterId], references: [id], onDelete: Cascade)
-  targetType ReportTargetType
-  targetId   String
-  reason     String
-  status     ReportStatus     @default(PENDING)
-  reviewedBy String?
-  reviewedAt DateTime?
-  createdAt  DateTime         @default(now())
+  id             String           @id @default(uuid())
+  reporterId     String
+  reporter       User             @relation(fields: [reporterId], references: [id], onDelete: Cascade)
+  targetType     ReportTargetType
+  targetId       String
+  reason         String
+  // A copy of the reported content taken when the report was filed, so an
+  // admin can still see what was reported after the owner deletes it.
+  snapshot       Json?
+  status         ReportStatus     @default(PENDING)
+  reviewedBy     String?
+  reviewedAt     DateTime?
+  // What the admin did: NONE, REMOVE_CONTENT or DEACTIVATE_USER.
+  actionTaken    String?
+  resolutionNote String?
+  createdAt      DateTime         @default(now())
 
   @@index([status, createdAt])
   @@index([reporterId])
+  @@index([targetType, targetId])
   @@map("reports")
 }
 
@@ -470,4 +550,110 @@ model Mute {
   @@index([muterId])
   @@index([mutedId])
   @@map("mutes")
+}
+
+// A poll belongs to exactly one post (the question is the post's content).
+// Votes are single-choice, final, and one per user.
+model Poll {
+  id        String   @id @default(uuid())
+  postId    String   @unique
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  options PollOption[]
+  votes   PollVote[]
+
+  @@map("polls")
+}
+
+model PollOption {
+  id        String @id @default(uuid())
+  pollId    String
+  poll      Poll   @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  text      String
+  position  Int
+  // Denormalized so reading results never has to count vote rows.
+  voteCount Int    @default(0)
+
+  votes PollVote[]
+
+  @@index([pollId])
+  @@map("poll_options")
+}
+
+model PollVote {
+  pollId    String
+  userId    String
+  optionId  String
+  poll      Poll       @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  option    PollOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
+  createdAt DateTime   @default(now())
+
+  // One vote per user per poll, enforced by the database itself.
+  @@id([pollId, userId])
+  @@index([optionId])
+  @@map("poll_votes")
+}
+
+// Groups are the "deeper layer" under the feed (PRD section 22).
+// MVP groups are public: anyone can read, members can post.
+model Group {
+  id          String   @id @default(uuid())
+  name        String
+  // Lowercase, hyphenated form of the name. Unique, so two groups
+  // can't differ only by capital letters or spacing.
+  slug        String   @unique
+  description String?
+  state       String?
+  avatarUrl   String?
+  createdById String
+  createdBy   User     @relation("GroupCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  memberCount Int      @default(1)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  members GroupMember[]
+  posts   Post[]
+
+  @@index([createdAt, id])
+  @@index([state])
+  @@index([createdById])
+  @@map("groups")
+}
+
+model GroupMember {
+  id       String          @id @default(uuid())
+  groupId  String
+  userId   String
+  group    Group           @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user     User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role     GroupMemberRole @default(MEMBER)
+  joinedAt DateTime        @default(now())
+
+  @@unique([groupId, userId])
+  @@index([groupId, joinedAt])
+  @@index([userId, joinedAt])
+  @@map("group_members")
+}
+
+// Every admin action is written here. adminId and adminUsername are plain
+// copies (not a foreign key), so the record survives if the admin account
+// is later removed.
+model AuditLog {
+  id            String   @id @default(uuid())
+  adminId       String
+  adminUsername String
+  action        String
+  targetType    String?
+  targetId      String?
+  reason        String?
+  metadata      Json?
+  createdAt     DateTime @default(now())
+
+  @@index([createdAt, id])
+  @@index([adminId, createdAt])
+  @@index([targetType, targetId])
+  @@map("audit_logs")
 }
