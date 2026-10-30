@@ -2,10 +2,10 @@ import { Link, useNavigate } from 'react-router-dom'
 import { Search, Bell, MessageCircle, Bot } from 'lucide-react'
 import { useState } from 'react'
 import { useApp } from '../../context/AppContext'
-import { currentUser } from '../../data/mock'
+import Avatar from '../ui/Avatar'
 
 export default function Navbar() {
-  const { setAssistantOpen } = useApp()
+  const { me, unread, setAssistantOpen } = useApp()
   const navigate = useNavigate()
   const [q, setQ] = useState('')
 
@@ -25,7 +25,7 @@ export default function Navbar() {
         <form className="navbar__search" onSubmit={submit}>
           <Search size={18} />
           <input
-            placeholder="Search corps members, places, opportunities"
+            placeholder="Search people, #hashtags, places, listings"
             value={q}
             onChange={(e) => setQ(e.target.value)}
           />
@@ -37,12 +37,13 @@ export default function Navbar() {
           </button>
           <button className="icon-btn" title="Messages" onClick={() => navigate('/messages')}>
             <MessageCircle size={20} />
+            {unread.messages > 0 && <span className="icon-btn__dot" />}
           </button>
           <button className="icon-btn" title="Notifications" onClick={() => navigate('/notifications')}>
             <Bell size={20} />
-            <span className="icon-btn__dot" />
+            {unread.notifications > 0 && <span className="icon-btn__dot" />}
           </button>
-          <Link to="/profile" className="avatar" title="Your profile">{currentUser.avatar}</Link>
+          <Avatar user={me} to="/profile" />
         </div>
       </div>
     </header>

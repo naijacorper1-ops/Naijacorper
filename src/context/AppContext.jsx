@@ -1,126 +1,99 @@
-import { createContext, useContext, useState, useCallback } from 'react'
-import { posts as seedPosts, currentUser } from '../data/mock'
+import { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react'
+import { api, setAccessToken, setOnSessionExpired } from '../lib/api'
 
 const AppContext = createContext(null)
 
-export function AppProvider({ children }) {
-  const [posts, setPosts] = useState(seedPosts)
-  const [following, setFollowing] = useState(new Set(['@amara_serves']))
-  const [likes, setLikes] = useState(new Set())
-  const [saved, setSaved] = useState(new Set())
-  const [reposted, setReposted] = useState(new Set())
-  const [muted, setMuted] = useState(new Set())
-  const [blocked, setBlocked] = useState(new Set())
-  const [hidden, setHidden] = useState(new Set()) // post ids removed from view
+// initialUser comes from main.jsx, which restores the session before the first render.
+export function AppProvider({ initialUser, children }) {
+  // The signed-in user (GET /users/me), or null when signed out.
+  const [me, setMe] = useState(initialUser)
+
   const [toast, setToast] = useState(null)
+  const [unread, setUnread] = useState({ notifications: 0, messages: 0 })
 
   // global modals
-  const [composerOpen, setComposerOpen] = useState(false)
+  const [composer, setComposer] = useState(null) // null = closed, else { quote, groupId }
   const [assistantOpen, setAssistantOpen] = useState(false)
 
+  const toastTimer = useRef(null)
   const showToast = useCallback((msg) => {
     setToast(msg)
-    setTimeout(() => setToast(null), 2600)
+    clearTimeout(toastTimer.current)
+    toastTimer.current = setTimeout(() => setToast(null), 2600)
   }, [])
 
-  const addPost = useCallback((text, quotedId = null) => {
-    const trimmed = text.trim()
-    if (!trimmed) return
-    setPosts(prev => [
-      {
-        id: Date.now(),
-        author: currentUser.handle,
-        time: 'now',
-        tag: `${currentUser.stage === 'serving' ? 'Serving' : 'Corper'} · ${currentUser.state}`,
-        text: trimmed,
-        quotedId,
-        likes: 0, comments: 0, reposts: 0,
-      },
-      ...prev,
-    ])
-    showToast(quotedId ? 'Quote posted 🎉' : 'Post shared 🎉')
-  }, [showToast])
-
-  const deletePost = useCallback((id) => {
-    setPosts(prev => prev.filter(p => p.id !== id))
-    showToast('Post deleted')
-  }, [showToast])
-
-  const hidePost = useCallback((id) => {
-    setHidden(prev => new Set(prev).add(id))
-    showToast('Post reported. Thanks — we\'ll review it.')
-  }, [showToast])
-
-  const toggleMute = useCallback((handle) => {
-    setMuted(prev => {
-      const next = new Set(prev)
-      if (next.has(handle)) { next.delete(handle); showToast(`Unmuted ${handle}`) }
-      else { next.add(handle); showToast(`Muted ${handle}`) }
-      return next
-    })
-  }, [showToast])
-
-  const toggleBlock = useCallback((handle) => {
-    setBlocked(prev => {
-      const next = new Set(prev)
-      if (next.has(handle)) { next.delete(handle); showToast(`Unblocked ${handle}`) }
-      else { next.add(handle); showToast(`Blocked ${handle}`) }
-      return next
-    })
-  }, [showToast])
-
-  const toggleFollow = useCallback((handle) => {
-    setFollowing(prev => {
-      const next = new Set(prev)
-      if (next.has(handle)) { next.delete(handle); showToast(`Unfollowed ${handle}`) }
-      else { next.add(handle); showToast(`Following ${handle}`) }
-      return next
-    })
-  }, [showToast])
-
-  const toggleLike = useCallback((id) => {
-    setLikes(prev => {
-      const next = new Set(prev)
-      next.has(id) ? next.delete(id) : next.add(id)
-      return next
-    })
+  const refreshMe = useCallback(async () => {
+    const { data } = await api.get('/users/me')
+    setMe(data)
+    return data
   }, [])
 
-  const toggleSave = useCallback((id) => {
-    setSaved(prev => {
-      const next = new Set(prev)
-      if (next.has(id)) { next.delete(id); showToast('Removed from saved') }
-      else { next.add(id); showToast('Saved') }
-      return next
-    })
-  }, [showToast])
+  useEffect(() => {
+    setOnSessionExpired(() => { setAccessToken(null); setMe(null) })
+  }, [])
 
-  const toggleRepost = useCallback((id) => {
-    setReposted(prev => {
-      const next = new Set(prev)
-      if (next.has(id)) { next.delete(id) }
-      else { next.add(id); showToast('Reposted') }
-      return next
-    })
-  }, [showToast])
+  // After login/register: keep the token and load the user.
+  const signIn = useCallback(async (token) => {
+    setAccessToken(token)
+    return refreshMe()
+  }, [refreshMe])
+
+  const signOut = useCallback(async () => {
+    try { await api.post('/auth/logout') } catch { /* signed out locally either way */ }
+    setAccessToken(null)
+    setMe(null)
+  }, [])
+
+  // Unread badges for the navbar, refreshed every 30 seconds while signed in.
+  const refreshUnread = useCallback(async () => {
+    try {
+      const [n, m] = await Promise.all([
+        api.get('/notifications/unread-count'),
+        api.get('/messaging/unread-count'),
+      ])
+      setUnread({ notifications: n.data.count, messages: m.data.count })
+    } catch { /* badges are not important enough to show an error */ }
+  }, [])
+
+  const signedIn = !!me
+  useEffect(() => {
+    if (!signedIn) return undefined
+    const first = setTimeout(refreshUnread, 0)
+    const timer = setInterval(refreshUnread, 30000)
+    return () => { clearTimeout(first); clearInterval(timer) }
+  }, [signedIn, refreshUnread])
+
+  // Lists that show posts (home feed, profile, group) listen here so a post
+  // written in the composer appears at the top straight away.
+  const postListeners = useRef(new Set())
+  const onPostCreated = useCallback((fn) => {
+    postListeners.current.add(fn)
+    return () => postListeners.current.delete(fn)
+  }, [])
+
+  const createPost = useCallback(async (body) => {
+    const { data } = await api.post('/posts', body)
+    postListeners.current.forEach(fn => fn(data))
+    setMe(prev => (prev && !body.groupId ? { ...prev, postsCount: (prev.postsCount ?? 0) + 1 } : prev))
+    return data
+  }, [])
+
+  const openComposer = useCallback((options = {}) => setComposer(options), [])
+  const closeComposer = useCallback(() => setComposer(null), [])
 
   const value = {
-    posts, addPost, deletePost, hidePost,
-    following, toggleFollow,
-    likes, toggleLike,
-    saved, toggleSave,
-    reposted, toggleRepost,
-    muted, toggleMute,
-    blocked, toggleBlock,
-    hidden,
+    me, setMe, refreshMe, signIn, signOut,
     toast, showToast,
-    composerOpen, setComposerOpen,
+    unread, setUnread, refreshUnread,
+    onPostCreated, createPost,
+    composer, openComposer, closeComposer,
     assistantOpen, setAssistantOpen,
   }
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useApp() {
   const ctx = useContext(AppContext)
   if (!ctx) throw new Error('useApp must be used within AppProvider')

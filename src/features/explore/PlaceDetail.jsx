@@ -1,22 +1,58 @@
-import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Star, MapPin, Lightbulb, MessageCircle } from 'lucide-react'
-import { places } from '../../data/mock'
+import { useEffect, useState } from 'react'
+import { Link, useParams, useNavigate } from 'react-router-dom'
+import { ArrowLeft, Star, MapPin, Trash2 } from 'lucide-react'
+import Avatar, { VerifiedBadge } from '../../components/ui/Avatar'
 import { useApp } from '../../context/AppContext'
+import { api, errorMessage } from '../../lib/api'
+import { EXPLORE_CATEGORIES, labelOf, timeAgo } from '../../lib/format'
+import { PlaceRow } from './Explore'
 
 export default function PlaceDetail() {
   const { id } = useParams()
-  const navigate = useNavigate()
-  const { showToast } = useApp()
-  const place = places.find(p => p.id === id)
+  return <PlacePage key={id} id={id} />
+}
 
-  if (!place) {
+function PlacePage({ id }) {
+  const navigate = useNavigate()
+  const { me, showToast } = useApp()
+  const [place, setPlace] = useState(null)
+  const [more, setMore] = useState([])
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    api.get(`/explore/${id}`)
+      .then(async ({ data }) => {
+        if (cancelled) return
+        setPlace(data)
+        // Other tips about the same kind of place in the same state.
+        const res = await api.get('/explore', { params: { category: data.category, state: data.state, pageSize: 6 } })
+        if (!cancelled) setMore(res.data.entries.filter(e => e.id !== data.id))
+      })
+      .catch(err => { if (!cancelled) setError(errorMessage(err)) })
+    return () => { cancelled = true }
+  }, [id])
+
+  const remove = async () => {
+    try {
+      await api.delete(`/explore/${id}`)
+      showToast('Tip deleted')
+      navigate('/explore', { replace: true })
+    } catch (err) {
+      showToast(errorMessage(err))
+    }
+  }
+
+  if (error || !place) {
     return (
       <div className="page">
         <button className="btn btn--ghost btn--sm" onClick={() => navigate(-1)}><ArrowLeft size={15} /> Back</button>
-        <div className="empty">Place not found.</div>
+        <div className="empty">{error || 'Loading…'}</div>
       </div>
     )
   }
+
+  const by = place.submittedBy
 
   return (
     <div className="page">
@@ -28,54 +64,30 @@ export default function PlaceDetail() {
       <div className="place-hero">
         <div className="place-hero__thumb">{place.name.charAt(0)}</div>
         <div>
-          <span className="place__type">{place.type}</span>
+          <span className="place__type">{labelOf(EXPLORE_CATEGORIES, place.category)}</span>
           <div className="place-hero__row">
-            <span className="rating"><Star size={16} fill="currentColor" /> {place.rating}</span>
-            <span className="muted-text">{place.reviews} reviews</span>
+            {place.rating && <span className="rating"><Star size={16} fill="currentColor" /> {place.rating}</span>}
+            <span className="muted-text"><MapPin size={13} /> {place.state}</span>
           </div>
-          <p className="place__note">“{place.note}”</p>
+          <p className="place__note">“{place.description}”</p>
         </div>
       </div>
 
-      <div className="btn-row">
-        <button className="btn btn--ghost btn--sm" onClick={() => showToast('Saved place')}>Save</button>
-        <button className="btn btn--primary btn--sm" onClick={() => showToast('Review form coming soon')}>
-          Write a review
-        </button>
+      <div className="follow-row">
+        <Avatar user={by} to={`/profile/${by.username}`} />
+        <div className="follow-row__info">
+          <Link to={`/profile/${by.username}`} className="follow-row__name">{by.fullName} <VerifiedBadge user={by} /></Link>
+          <span className="follow-row__sub">Shared {timeAgo(place.createdAt)}</span>
+        </div>
+        {by.id === me.id && <button className="btn btn--ghost btn--sm" onClick={remove}><Trash2 size={14} /> Delete</button>}
       </div>
 
-      <h2 className="section-title"><Lightbulb size={17} /> Corps-member tips</h2>
-      <div className="card">
-        {place.tips.map((t, i) => (
-          <div key={i} className="tip-row">• {t}</div>
-        ))}
-      </div>
-
-      <h2 className="section-title">Reviews</h2>
-      <div className="feed__list">
-        <article className="post">
-          <div className="post__avatar avatar">A</div>
-          <div className="post__body">
-            <div className="post__head">
-              <span className="post__name">Amara N.</span>
-              <span className="post__meta">@amara_serves · 3d</span>
-              <span className="rating"><Star size={13} fill="currentColor" /> 5</span>
-            </div>
-            <p className="post__text">Been coming here since camp. Consistent and affordable.</p>
-          </div>
-        </article>
-        <article className="post">
-          <div className="post__avatar avatar">C</div>
-          <div className="post__body">
-            <div className="post__head">
-              <span className="post__name">Chidi Eze</span>
-              <span className="post__meta">@chidi_dev · 1w</span>
-              <span className="rating"><Star size={13} fill="currentColor" /> 4</span>
-            </div>
-            <p className="post__text">Good spot, can get busy in the afternoon.</p>
-          </div>
-        </article>
-      </div>
+      {more.length > 0 && (
+        <>
+          <h2 className="section-title">More {labelOf(EXPLORE_CATEGORIES, place.category).toLowerCase()} tips in {place.state}</h2>
+          <div className="place-list">{more.map(p => <PlaceRow key={p.id} place={p} />)}</div>
+        </>
+      )}
     </div>
   )
 }

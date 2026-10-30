@@ -1,4 +1,4 @@
-import { NavLink, Outlet } from 'react-router-dom'
+import { Link, NavLink, Outlet } from 'react-router-dom'
 import {
   Home, Compass, Users, ShoppingBag, Briefcase,
   Calendar, Building2, MapPinned, Bot,
@@ -25,7 +25,7 @@ const SECONDARY = [
 
 // mobile bottom bar keeps only the five primary areas
 export default function Layout() {
-  const { setComposerOpen, setAssistantOpen } = useApp()
+  const { me, openComposer, setAssistantOpen } = useApp()
 
   return (
     <div className="app">
@@ -52,12 +52,18 @@ export default function Layout() {
               <span>Assistant</span>
             </button>
           </nav>
-          <button className="btn btn--primary sidenav__post" onClick={() => setComposerOpen(true)}>
+          <button className="btn btn--primary sidenav__post" onClick={() => openComposer()}>
             Post
           </button>
         </aside>
 
         <main className="app__main">
+          {!me.emailVerified && (
+            <div className="verify-banner">
+              Verify your email to post photos, sell, create groups and get the verified badge.{' '}
+              <Link to="/verify-email">Enter your code</Link>
+            </div>
+          )}
           <Outlet />
         </main>
       </div>
@@ -71,7 +77,7 @@ export default function Layout() {
         ))}
       </nav>
 
-      <button className="fab" onClick={() => setComposerOpen(true)} aria-label="Create post">+</button>
+      <button className="fab" onClick={() => openComposer()} aria-label="Create post">+</button>
 
       <ComposerModal />
       <AssistantModal />

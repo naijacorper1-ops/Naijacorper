@@ -4,7 +4,7 @@
 
 NaijaCorper connects prospective, serving and former corps members so they can share, discover, connect, trade, learn and find opportunities throughout the NYSC journey. This repository contains the **frontend** of the product, built with React and Vite.
 
-> This is the frontend layer only. It runs on mock data and is ready to be connected to the backend API.
+> This is the frontend layer. It talks to the NaijaCorper backend API (`https://api.naijacorper.com/api/v1`). Opportunities, Events, PPA reviews, State guides and the Assistant still use sample data because the backend has no endpoints for them yet.
 
 ---
 
@@ -101,9 +101,10 @@ src/
 │   ├── assistant/          # AI assistant modal
 │   ├── layout/             # Navbar, sidebar and page layout
 │   ├── post/               # Post card and composer
-│   └── ui/                 # Reusable modal and toast
-├── context/                # Global app state (posts, follows, likes, etc.)
-├── data/                   # Mock data used across the app
+│   └── ui/                 # Modal, toast, avatar, follow button, report dialog, list states
+├── context/                # Signed-in user, toasts, composer, unread badges
+├── data/                   # Sample data for screens without backend endpoints
+├── lib/                    # API client (api.js), paging hook, formatting helpers
 ├── features/
 │   ├── home/               # Social feed
 │   ├── explore/            # Explore + place detail
@@ -129,8 +130,9 @@ src/
 
 ## 📝 Notes
 
-- **Data:** All content is currently mock/seed data. The app is structured so screens can be wired to real backend endpoints (axios is already included).
-- **Authentication:** Sign in / sign up is handled separately and is not part of this branch. The onboarding flow at `/onboarding` is ready to be linked after authentication.
+- **Backend connection:** `npm run dev` forwards `/api/v1` to the live API through the Vite proxy (`vite.config.js`), and Vercel does the same in production (`vercel.json`). The base path comes from `VITE_API_BASE_URL` in `.env.local`.
+- **Authentication:** Sign up → email code (`/verify-email`) → onboarding. Sessions use a 15-minute access token plus a refresh cookie; `src/lib/api.js` refreshes the token automatically.
+- **Messages** refresh every few seconds. The backend also offers a Socket.IO channel (`/messaging`) for instant delivery; adding `socket.io-client` would be the next step.
 
 ---
 
