@@ -531,3 +531,6 @@ select.chip { cursor: pointer; }
   .msg-thread__back { display: inline-block; }
   .comment-replies { margin-left: 20px; }
 }
+
+/* ---------- real-time messaging ---------- */
+.msg-offline { margin: 2px 0 8px; font-size: 12px; color: var(--muted); }
