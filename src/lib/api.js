@@ -13,6 +13,11 @@ export function hasAccessToken() {
   return !!accessToken
 }
 
+// The socket (src/lib/socket.js) sends the same token in its handshake.
+export function getAccessToken() {
+  return accessToken
+}
+
 export const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL,
   withCredentials: true, // lets the browser send the refresh cookie

@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react'
 import { api, setAccessToken, setOnSessionExpired } from '../lib/api'
+import { connectSocket, disconnectSocket, onNewMessage, onSocketStatus } from '../lib/socket'
 
 const AppContext = createContext(null)
 
@@ -63,6 +64,26 @@ export function AppProvider({ initialUser, children }) {
     return () => { clearTimeout(first); clearInterval(timer) }
   }, [signedIn, refreshUnread])
 
+  // Real-time messaging: one socket while signed in. `realtime` tells screens
+  // whether it is up; while it is down they fall back to polling.
+  const [realtime, setRealtime] = useState(false)
+  const myId = me?.id
+  useEffect(() => {
+    if (!signedIn) return undefined
+    const offStatus = onSocketStatus(setRealtime)
+    connectSocket()
+    return () => { offStatus(); disconnectSocket() }
+  }, [signedIn])
+
+  // A message from someone else lights up the navbar badge straight away.
+  // Opening the conversation marks it read and refreshes the real count.
+  useEffect(() => {
+    if (!myId) return undefined
+    return onNewMessage((m) => {
+      if (m.senderId !== myId) setUnread(prev => ({ ...prev, messages: prev.messages + 1 }))
+    })
+  }, [myId])
+
   // Lists that show posts (home feed, profile, group) listen here so a post
   // written in the composer appears at the top straight away.
   const postListeners = useRef(new Set())
@@ -85,6 +106,7 @@ export function AppProvider({ initialUser, children }) {
     me, setMe, refreshMe, signIn, signOut,
     toast, showToast,
     unread, setUnread, refreshUnread,
+    realtime, onNewMessage,
     onPostCreated, createPost,
     composer, openComposer, closeComposer,
     assistantOpen, setAssistantOpen,

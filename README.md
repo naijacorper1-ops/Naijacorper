@@ -37,7 +37,8 @@ The frontend is organised around six core areas, plus supporting screens.
 - **Vite** (build tool + dev server)
 - **React Router** for navigation
 - **lucide-react** for icons
-- **axios** (ready for API integration)
+- **axios** for the REST API
+- **socket.io-client** for real-time messaging
 - Plain CSS with a shared design-token system
 
 ---
@@ -132,7 +133,10 @@ src/
 
 - **Backend connection:** `npm run dev` forwards `/api/v1` to the live API through the Vite proxy (`vite.config.js`), and Vercel does the same in production (`vercel.json`). The base path comes from `VITE_API_BASE_URL` in `.env.local`.
 - **Authentication:** Sign up → email code (`/verify-email`) → onboarding. Sessions use a 15-minute access token plus a refresh cookie; `src/lib/api.js` refreshes the token automatically.
-- **Messages** refresh every few seconds. The backend also offers a Socket.IO channel (`/messaging`) for instant delivery; adding `socket.io-client` would be the next step.
+- **Real-time messaging:** `src/lib/socket.js` connects to the backend's Socket.IO `/messaging` namespace with the access token (`auth: { token }`) while signed in. Messages are sent with `sendMessage` (the acknowledgement is the saved message) and received with `newMessage`. If the token has expired, the client refreshes it and reconnects.
+  - **Dev:** the Vite proxy forwards `/socket.io` (with WebSocket upgrade) to the backend, so leave `VITE_SOCKET_URL` empty.
+  - **Production (Vercel):** Vercel rewrites can't proxy WebSockets, so the socket connects straight to `https://api.naijacorper.com` (override with `VITE_SOCKET_URL`). The site's origin must be in the backend's `FRONTEND_URL`.
+  - **Fallback:** while the socket is disconnected, the Messages screen polls over REST (every `VITE_POLLING_FALLBACK_MS`, default 5s) and sends over REST, then stops polling once it reconnects.
 
 ---
 
