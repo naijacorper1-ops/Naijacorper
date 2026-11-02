@@ -5,15 +5,22 @@ import Avatar from '../../components/ui/Avatar'
 import { useApp } from '../../context/AppContext'
 import { api, errorMessage } from '../../lib/api'
 import { clockTime, timeAgo } from '../../lib/format'
+import { sendMessageRealtime } from '../../lib/socket'
 
-// New messages are fetched every few seconds. The backend also offers a
-// Socket.IO connection (/messaging namespace) for instant delivery; switching
-// to it later only changes how `refresh` gets called.
-const THREAD_POLL_MS = 5000
+// New messages arrive instantly over Socket.IO (`newMessage`). While the
+// socket is disconnected the screen falls back to fetching every few seconds,
+// and it fetches once more when the socket comes back to catch up.
+const THREAD_POLL_MS = Number(import.meta.env.VITE_POLLING_FALLBACK_MS) || 5000
 const INBOX_POLL_MS = 15000
 
+// Oldest first, no duplicates.
+function mergeMessages(prev, added) {
+  if (!added.length) return prev
+  return [...prev, ...added].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
+}
+
 export default function Messages() {
-  const { me, refreshUnread } = useApp()
+  const { me, refreshUnread, realtime, onNewMessage } = useApp()
   const [params, setParams] = useSearchParams()
   const activeId = params.get('c')
 
@@ -36,11 +43,43 @@ export default function Messages() {
     .catch(err => setListError(errorMessage(err)))
     .then(() => setLoadingList(false)), [])
 
+  // Load now, and again whenever the socket goes up or down. Keep polling only
+  // while it is down.
   useEffect(() => {
     loadInbox()
+    if (realtime) return undefined
     const timer = setInterval(loadInbox, INBOX_POLL_MS)
     return () => clearInterval(timer)
-  }, [loadInbox])
+  }, [loadInbox, realtime])
+
+  // Only mention a lost connection if it lasts; connecting takes a moment.
+  const [offlineNotice, setOfflineNotice] = useState(false)
+  useEffect(() => {
+    const t = setTimeout(() => setOfflineNotice(!realtime), realtime ? 0 : 4000)
+    return () => clearTimeout(t)
+  }, [realtime])
+
+  // Live: move the conversation to the top with its new last message.
+  const convosRef = useRef(convos)
+  const activeIdRef = useRef(activeId)
+  useEffect(() => { convosRef.current = convos; activeIdRef.current = activeId })
+  useEffect(() => onNewMessage((m) => {
+    if (!convosRef.current.some(c => c.id === m.conversationId)) {
+      loadInbox() // a brand-new conversation
+      return
+    }
+    const fromOther = m.senderId !== me.id
+    setConvos(prev => prev
+      .map(c => c.id === m.conversationId
+        ? {
+          ...c,
+          lastMessage: m,
+          lastMessageAt: m.createdAt,
+          unreadCount: fromOther && c.id !== activeIdRef.current ? (c.unreadCount ?? 0) + 1 : c.unreadCount,
+        }
+        : c)
+      .sort((a, b) => new Date(b.lastMessageAt) - new Date(a.lastMessageAt)))
+  }), [onNewMessage, loadInbox, me.id])
 
   const loadOlderConvos = async () => {
     const { data } = await api.get('/messaging/conversations', { params: { cursor: convosCursor } })
@@ -75,6 +114,7 @@ export default function Messages() {
       <aside className="msg-list">
         <div className="msg-list__head">
           <h1 className="page__title">Messages</h1>
+          {!realtime && offlineNotice && <p className="msg-offline">Reconnecting… new messages may take a few seconds.</p>}
           <label className="msg-search"><Search size={15} />
             <input placeholder="Search conversations" value={filter} onChange={(e) => setFilter(e.target.value)} />
           </label>
@@ -122,7 +162,7 @@ export default function Messages() {
 }
 
 function Thread({ conversation, onRead, onSent, onBack }) {
-  const { me, showToast } = useApp()
+  const { me, showToast, realtime, onNewMessage } = useApp()
   const other = conversation.otherParticipant
   const [messages, setMessages] = useState([]) // oldest first
   const [olderCursor, setOlderCursor] = useState(null)
@@ -133,6 +173,14 @@ function Thread({ conversation, onRead, onSent, onBack }) {
   const stickToBottom = useRef(true)
   const seen = useRef(new Set()) // ids already on screen
 
+  // Adds messages not on screen yet; returns the ones that were new.
+  const addMessages = useCallback((list) => {
+    const added = list.filter(m => !seen.current.has(m.id))
+    added.forEach(m => seen.current.add(m.id))
+    if (added.length) setMessages(prev => mergeMessages(prev, added))
+    return added
+  }, [])
+
   const markRead = useCallback(async () => {
     try {
       await api.patch(`/messaging/conversations/${conversation.id}/read`)
@@ -140,28 +188,44 @@ function Thread({ conversation, onRead, onSent, onBack }) {
     } catch { /* not important */ }
   }, [conversation.id, onRead])
 
-  // Newest page; merges with what is already on screen.
+  // Newest page; merges with what is already on screen. Returns what was new.
   const refresh = useCallback(async (first = false) => {
     try {
       const { data } = await api.get(`/messaging/conversations/${conversation.id}/messages`)
-      const page = [...data.messages].reverse()
-      const added = page.filter(m => !seen.current.has(m.id))
-      added.forEach(m => seen.current.add(m.id))
-      if (added.length) setMessages(prev => [...prev, ...added])
+      const added = addMessages(data.messages)
       if (first) setOlderCursor(data.nextCursor)
       if (first || added.some(m => m.senderId !== me.id)) markRead()
+      return added
     } catch (err) {
       if (first) showToast(errorMessage(err))
+      return []
     } finally {
       if (first) setLoading(false)
     }
-  }, [conversation.id, me.id, markRead, showToast])
+  }, [conversation.id, me.id, addMessages, markRead, showToast])
 
+  // First load, then: poll only while the socket is down, and catch up once
+  // when it comes back.
+  const firstLoad = useRef(true)
   useEffect(() => {
-    refresh(true)
+    if (firstLoad.current) {
+      firstLoad.current = false
+      refresh(true)
+    } else if (realtime) {
+      const t = setTimeout(() => refresh(false), 0)
+      return () => clearTimeout(t)
+    }
+    if (realtime) return undefined
     const timer = setInterval(() => refresh(false), THREAD_POLL_MS)
     return () => clearInterval(timer)
-  }, [refresh])
+  }, [realtime, refresh])
+
+  // Live messages for this conversation.
+  useEffect(() => onNewMessage((m) => {
+    if (m.conversationId !== conversation.id) return
+    const added = addMessages([m])
+    if (added.length && m.senderId !== me.id) markRead()
+  }), [onNewMessage, conversation.id, me.id, addMessages, markRead])
 
   useEffect(() => {
     if (stickToBottom.current) bottomRef.current?.scrollIntoView({ block: 'end' })
@@ -170,27 +234,46 @@ function Thread({ conversation, onRead, onSent, onBack }) {
   const loadOlder = async () => {
     stickToBottom.current = false
     const { data } = await api.get(`/messaging/conversations/${conversation.id}/messages`, { params: { cursor: olderCursor } })
-    const older = [...data.messages].reverse().filter(m => !seen.current.has(m.id))
-    older.forEach(m => seen.current.add(m.id))
-    setMessages(prev => [...older, ...prev])
+    addMessages(data.messages)
     setOlderCursor(data.nextCursor)
+  }
+
+  const sendOverRest = async (content) => {
+    const { data } = await api.post(`/messaging/conversations/${conversation.id}/messages`, { content })
+    return data
   }
 
   const send = async () => {
     const content = text.trim()
     if (!content) return
     setSending(true)
+    stickToBottom.current = true
     try {
-      const { data } = await api.post(`/messaging/conversations/${conversation.id}/messages`, { content })
-      stickToBottom.current = true
-      if (!seen.current.has(data.id)) {
-        seen.current.add(data.id)
-        setMessages(prev => [...prev, data])
+      let saved
+      try {
+        // The acknowledgement carries the saved message.
+        saved = await sendMessageRealtime(conversation.id, content)
+      } catch (err) {
+        if (err.code === 'NOT_CONNECTED') {
+          // Nothing went out over the socket, so REST is safe.
+          saved = await sendOverRest(content)
+        } else if (err.code === 'UNCONFIRMED') {
+          // It may have been saved. Check before asking the user to resend,
+          // so we never post it twice.
+          const landed = (await refresh(false)).find(m => m.senderId === me.id && m.content === content)
+          if (!landed) throw err
+          saved = landed
+        } else {
+          throw err
+        }
       }
+      addMessages([saved])
       setText('')
-      onSent(conversation.id, data)
+      onSent(conversation.id, saved)
     } catch (err) {
-      showToast(errorMessage(err))
+      showToast(err.isSocketError
+        ? (err.code === 'UNCONFIRMED' ? 'Message may not have been sent. Please try again.' : err.message)
+        : errorMessage(err))
     } finally {
       setSending(false)
     }
