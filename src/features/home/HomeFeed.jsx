@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { Image as ImageIcon, BarChart3, TrendingUp } from 'lucide-react'
 import PostList from '../../components/post/PostList'
 import Avatar from '../../components/ui/Avatar'
+import SuggestedPeople from '../../components/ui/SuggestedPeople'
 import { useApp } from '../../context/AppContext'
 import { api, errorMessage } from '../../lib/api'
 import usePaged from '../../lib/usePaged'
@@ -83,6 +84,9 @@ export default function HomeFeed() {
           </div>
         </div>
 
+        {/* On narrow screens the right rail is hidden, so suggestions show here. */}
+        <SuggestedPeople limit={3} className="feed-suggest" />
+
         <PostList
           paged={feed}
           acceptNew={acceptNew}
@@ -91,6 +95,7 @@ export default function HomeFeed() {
       </section>
 
       <aside className="rail">
+        <SuggestedPeople />
         <TrendingTags />
       </aside>
     </div>
