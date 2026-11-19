@@ -21,6 +21,14 @@ import PostDetail from './features/post/PostDetail'
 import Messages from './features/messages/Messages'
 import Notifications from './features/notifications/Notifications'
 import Search from './features/search/Search'
+import People from './features/people/People'
+import Admin from './features/admin/Admin'
+import AdminOverview from './features/admin/AdminOverview'
+import AdminVerifications from './features/admin/AdminVerifications'
+import AdminReports from './features/admin/AdminReports'
+import AdminUsers from './features/admin/AdminUsers'
+import AdminContent from './features/admin/AdminContent'
+import AdminAudit from './features/admin/AdminAudit'
 import { useApp } from './context/AppContext'
 import './App.css'
 
@@ -68,6 +76,16 @@ export default function App() {
         <Route path="/messages" element={<Messages />} />
         <Route path="/notifications" element={<Notifications />} />
         <Route path="/search" element={<Search />} />
+        <Route path="/people" element={<People />} />
+        {/* Admin only: <Admin> sends everyone else back home. */}
+        <Route path="/admin" element={<Admin />}>
+          <Route index element={<AdminOverview />} />
+          <Route path="verifications" element={<AdminVerifications />} />
+          <Route path="reports" element={<AdminReports />} />
+          <Route path="users" element={<AdminUsers />} />
+          <Route path="content" element={<AdminContent />} />
+          <Route path="audit" element={<AdminAudit />} />
+        </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

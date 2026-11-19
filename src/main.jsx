@@ -1,10 +1,11 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
+// Global styles first, so page styles (App.css) and their mobile rules win.
+import './index.css'
 import App from './App.jsx'
 import Splash from './components/ui/Splash'
 import { AppProvider } from './context/AppContext'
-import './index.css'
 import { api, refreshAccessToken } from './lib/api'
 
 const root = ReactDOM.createRoot(document.getElementById('root'))

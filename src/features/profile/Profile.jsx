@@ -100,6 +100,7 @@ function ProfilePage({ username, fromLink }) {
 
   return (
     <div className="page">
+      <div className="profile-card">
       <div className="profile-cover" />
       <div className="profile-head">
         <Avatar user={user} className="profile-avatar" />
@@ -165,6 +166,7 @@ function ProfilePage({ username, fromLink }) {
             {t}
           </button>
         ))}
+      </div>
       </div>
 
       {tab === 'About' && (

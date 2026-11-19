@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { api, errorMessage } from '../../lib/api'
 import { useApp } from '../../context/AppContext'
+import { clearSuggestions } from '../../lib/suggestions'
 
 // Follow / unfollow a user. `user` needs id, username and isFollowing.
 export default function FollowButton({ user, onChange, className = '' }) {
@@ -17,6 +18,7 @@ export default function FollowButton({ user, onChange, className = '' }) {
       else await api.delete(`/users/${user.id}/follow`)
       setMe(prev => prev && { ...prev, followingCount: Math.max(0, (prev.followingCount ?? 0) + (next ? 1 : -1)) })
       showToast(next ? `Following @${user.username}` : `Unfollowed @${user.username}`)
+      clearSuggestions() // the suggestion list is out of date now
       onChange?.(next)
     } catch (err) {
       setFollowing(!next)
