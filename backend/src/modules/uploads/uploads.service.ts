@@ -12,7 +12,7 @@ import {
 } from '../../common/utils/file-sniff';
 import { isOurCloudinaryUrl } from '../../common/validators/cloudinary-url.validator';
 
-export type PublicFolder = 'posts' | 'listings' | 'avatars' | 'groups';
+export type PublicFolder = 'posts' | 'listings' | 'avatars' | 'groups' | 'events';
 
 export interface StoredDocument {
   publicId: string;
@@ -42,6 +42,11 @@ export class UploadsService implements OnModuleInit {
   // Photos only. A listing is a product photo, not a video.
   async uploadListingImage(file: Express.Multer.File | undefined) {
     return this.uploadPublic(file, 'listings', IMAGE_KINDS);
+  }
+
+  // Event cover photos. Photos only.
+  async uploadEventCover(file: Express.Multer.File | undefined) {
+    return this.uploadPublic(file, 'events', IMAGE_KINDS);
   }
 
   // Cropped to a square around the face or main subject, so every avatar

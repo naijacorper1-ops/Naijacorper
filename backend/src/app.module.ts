@@ -12,6 +12,7 @@ import { AdminModule } from './modules/admin/admin.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { CommentsModule } from './modules/comments/comments.module';
+import { EventsModule } from './modules/events/events.module';
 import { ExploreModule } from './modules/explore/explore.module';
 import { FeedModule } from './modules/feed/feed.module';
 import { FollowsModule } from './modules/follows/follows.module';
@@ -23,7 +24,9 @@ import { MessagingModule } from './modules/messaging/messaging.module';
 import { ModerationModule } from './modules/moderation/moderation.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { OnboardingModule } from './modules/onboarding/onboarding.module';
+import { OpportunitiesModule } from './modules/opportunities/opportunities.module';
 import { PostsModule } from './modules/posts/posts.module';
+import { PpaModule } from './modules/ppa/ppa.module';
 import { UploadsModule } from './modules/uploads/uploads.module';
 import { UsersModule } from './modules/users/users.module';
 
@@ -54,6 +57,9 @@ import { UsersModule } from './modules/users/users.module';
     ModerationModule,
     GroupsModule,
     HashtagsModule,
+    OpportunitiesModule,
+    EventsModule,
+    PpaModule,
     AuditModule,
     AdminModule,
   ],

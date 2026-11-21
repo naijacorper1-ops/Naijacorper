@@ -14,6 +14,8 @@ export interface CreateNotificationInput {
   commentId?: string;
   conversationId?: string;
   listingId?: string;
+  eventId?: string;
+  opportunityId?: string;
   message?: string;
 }
 
@@ -31,6 +33,11 @@ const TYPE_TO_PREFERENCE_KEY: Record<NotificationType, PreferenceKey | null> = {
   VERIFICATION_REJECTED: null,
   LISTING_REMOVED: null,
   CONTENT_REMOVED: null,
+  OPPORTUNITY_APPROVED: null,
+  OPPORTUNITY_REJECTED: null,
+  EVENT_APPROVED: null,
+  EVENT_REJECTED: null,
+  EVENT_CANCELLED: null,
 };
 
 const ACTOR_INCLUDE = { actor: { select: PUBLIC_USER_SELECT } } satisfies Prisma.NotificationInclude;
@@ -67,6 +74,21 @@ export class NotificationsService {
     } catch (error) {
       this.logger.warn(`Could not create a ${input.type} notification: ${String(error)}`);
       return null;
+    }
+  }
+
+  // The same notification for many people at once (an event was cancelled).
+  // Written in batches so a big event cannot hit the database's limit on
+  // values per statement. Like create(), it never throws.
+  async createMany(inputs: CreateNotificationInput[]) {
+    const BATCH = 500;
+
+    try {
+      for (let i = 0; i < inputs.length; i += BATCH) {
+        await this.prisma.notification.createMany({ data: inputs.slice(i, i + BATCH) });
+      }
+    } catch (error) {
+      this.logger.warn(`Could not create ${inputs.length} notifications: ${String(error)}`);
     }
   }
 

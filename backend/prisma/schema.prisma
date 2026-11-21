@@ -78,6 +78,11 @@ enum NotificationType {
   VERIFICATION_REJECTED
   LISTING_REMOVED
   CONTENT_REMOVED
+  OPPORTUNITY_APPROVED
+  OPPORTUNITY_REJECTED
+  EVENT_APPROVED
+  EVENT_REJECTED
+  EVENT_CANCELLED
 }
 
 // PRD section 25
@@ -108,6 +113,9 @@ enum ReportTargetType {
   COMMENT
   LISTING
   GROUP
+  OPPORTUNITY
+  EVENT
+  PPA_REVIEW
 }
 
 enum ReportStatus {
@@ -194,6 +202,12 @@ model User {
   pollVotes        PollVote[]
   groupsCreated    Group[]       @relation("GroupCreator")
   groupMemberships GroupMember[]
+
+  opportunities Opportunity[] @relation("OpportunityPoster")
+  eventsCreated Event[]       @relation("EventCreator")
+  eventRsvps    EventRsvp[]
+  ppaReviews    PpaReview[]
+  ppasAdded     Ppa[]         @relation("PpaCreator")
 
   @@index([state])
   @@index([createdAt])
@@ -452,6 +466,8 @@ model Notification {
   commentId      String?
   conversationId String?
   listingId      String?
+  eventId        String?
+  opportunityId  String?
   // Human-readable text for system notifications, e.g. a rejection reason.
   message        String?
 
@@ -656,4 +672,258 @@ model AuditLog {
   @@index([adminId, createdAt])
   @@index([targetType, targetId])
   @@map("audit_logs")
+}
+
+// Opportunities, events and PPA reviews
+
+enum OpportunityType {
+  JOB
+  INTERNSHIP
+  FREELANCE
+  SCHOLARSHIP
+  GRANT
+  TRAINING
+  COMPETITION
+  BUSINESS
+  NETWORKING
+  OTHER
+}
+
+// PENDING: waiting for an admin. OPEN and CLOSED are public. REJECTED and
+// REMOVED are hidden from everyone except the poster and admins.
+enum OpportunityStatus {
+  PENDING
+  OPEN
+  CLOSED
+  REJECTED
+  REMOVED
+}
+
+enum WorkMode {
+  ONSITE
+  REMOTE
+  HYBRID
+}
+
+enum EmploymentType {
+  FULL_TIME
+  PART_TIME
+  CONTRACT
+  VOLUNTEER
+}
+
+model Opportunity {
+  id               String          @id @default(uuid())
+  postedById       String
+  postedBy         User            @relation("OpportunityPoster", fields: [postedById], references: [id], onDelete: Cascade)
+  type             OpportunityType
+  title            String
+  organization     String
+  description      String
+  mode             WorkMode        @default(ONSITE)
+  // Empty for remote or nationwide opportunities.
+  state            String?
+  city             String?
+  country          String          @default("Nigeria")
+  employmentType   EmploymentType?
+  // Whole naira, per month for jobs and internships unless the note says otherwise.
+  compensationMin  Int?
+  compensationMax  Int?
+  compensationNote String?
+  duration         String?
+  deadline         DateTime?
+  applyUrl         String?
+  applyEmail       String?
+
+  status          OpportunityStatus @default(PENDING)
+  // Who decided on a submission and when, and why it was rejected.
+  reviewedBy      String?
+  reviewedAt      DateTime?
+  rejectionReason String?
+  // Set when an admin removes it. The poster can see why.
+  removedReason   String?
+  removedAt       DateTime?
+  removedBy       String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, createdAt, id])
+  @@index([status, type, createdAt])
+  @@index([status, state, createdAt])
+  @@index([postedById, createdAt])
+  @@map("opportunities")
+}
+
+enum EventCategory {
+  MEETUP
+  NYSC_EVENT
+  NETWORKING
+  TECH
+  BUSINESS
+  SOCIAL
+  TRAINING
+  CAREER
+}
+
+enum EventFormat {
+  PHYSICAL
+  VIRTUAL
+  HYBRID
+}
+
+// PENDING: waiting for an admin. PUBLISHED is public. CANCELLED events stay
+// reachable by link so people who planned to go can see it. REJECTED and
+// REMOVED are hidden from everyone except the creator and admins.
+enum EventStatus {
+  PENDING
+  PUBLISHED
+  REJECTED
+  CANCELLED
+  REMOVED
+}
+
+model Event {
+  id              String        @id @default(uuid())
+  createdById     String
+  createdBy       User          @relation("EventCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  title           String
+  description     String
+  category        EventCategory
+  coverImageUrl   String?
+  // Shown as "by ...". Defaults to the creator's name in the API when empty.
+  organizerName   String?
+  // Stored in UTC. Nigeria has a single time zone (UTC+1).
+  startsAt        DateTime
+  endsAt          DateTime
+  format          EventFormat   @default(PHYSICAL)
+  state           String?
+  lga             String?
+  city            String?
+  venue           String?
+  registrationUrl String?
+  meetingUrl      String?
+
+  status          EventStatus @default(PENDING)
+  reviewedBy      String?
+  reviewedAt      DateTime?
+  rejectionReason String?
+  removedReason   String?
+  removedAt       DateTime?
+  removedBy       String?
+
+  // Kept in step with the rows in event_rsvps, like likeCount on posts.
+  rsvpCount Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  rsvps EventRsvp[]
+
+  @@index([status, startsAt, id])
+  @@index([status, category, startsAt])
+  @@index([status, state, startsAt])
+  @@index([status, createdAt])
+  @@index([createdById, createdAt])
+  @@map("events")
+}
+
+model EventRsvp {
+  id        String   @id @default(uuid())
+  eventId   String
+  event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([eventId, userId])
+  @@index([eventId, createdAt, id])
+  @@index([userId, createdAt])
+  @@map("event_rsvps")
+}
+
+enum PpaSector {
+  BANKING_FINANCE
+  TECHNOLOGY
+  EDUCATION
+  HEALTHCARE
+  GOVERNMENT
+  MEDIA
+  MANUFACTURING
+  NGO
+  OTHER
+}
+
+// POOR=1, FAIR=2, GOOD=3, EXCELLENT=4 when averaged.
+enum RatingLevel {
+  POOR
+  FAIR
+  GOOD
+  EXCELLENT
+}
+
+// LOW=1, MODERATE=2, HIGH=3 when averaged.
+enum IntensityLevel {
+  LOW
+  MODERATE
+  HIGH
+}
+
+// A place of primary assignment. Created the first time a verified corps
+// member reviews it. nameKey is the name with case, punctuation, spaces and
+// words like "Ltd" removed, so "Paystack" and "PAYSTACK Ltd." are one PPA.
+model Ppa {
+  id          String     @id @default(uuid())
+  name        String
+  nameKey     String
+  state       String
+  lga         String?
+  sector      PpaSector?
+  createdById String?
+  createdBy   User?      @relation("PpaCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  // Totals over all reviews, kept in step with ppa_reviews inside the same
+  // transaction. Averages are worked out from these when a PPA is shown.
+  reviewCount    Int       @default(0)
+  ratingSum      Int       @default(0)
+  environmentSum Int       @default(0)
+  learningSum    Int       @default(0)
+  workloadSum    Int       @default(0)
+  staffSum       Int       @default(0)
+  lastReviewedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  reviews PpaReview[]
+
+  @@unique([nameKey, state])
+  @@index([lastReviewedAt, id])
+  @@index([state, lastReviewedAt])
+  @@index([sector])
+  @@map("ppas")
+}
+
+model PpaReview {
+  id                String         @id @default(uuid())
+  ppaId             String
+  ppa               Ppa            @relation(fields: [ppaId], references: [id], onDelete: Cascade)
+  authorId          String
+  author            User           @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  overallRating     Int
+  environment       RatingLevel
+  learning          IntensityLevel
+  workload          IntensityLevel
+  staffRelationship RatingLevel
+  content           String
+  // When true (the default) the author is never shown to other users.
+  isAnonymous       Boolean        @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([ppaId, authorId])
+  @@index([ppaId, createdAt, id])
+  @@index([authorId, createdAt])
+  @@index([createdAt, id])
+  @@map("ppa_reviews")
 }

@@ -8,6 +8,7 @@ import { UploadsModule } from '../uploads/uploads.module';
 import { AdminContentService } from './admin-content.service';
 import { AdminReportsService } from './admin-reports.service';
 import { AdminStatsService } from './admin-stats.service';
+import { AdminSubmissionsService } from './admin-submissions.service';
 import { AdminUsersService } from './admin-users.service';
 import { AdminVerificationsService } from './admin-verifications.service';
 import { AdminController } from './admin.controller';
@@ -28,6 +29,7 @@ import { AdminController } from './admin.controller';
     AdminVerificationsService,
     AdminReportsService,
     AdminContentService,
+    AdminSubmissionsService,
   ],
 })
 export class AdminModule {}

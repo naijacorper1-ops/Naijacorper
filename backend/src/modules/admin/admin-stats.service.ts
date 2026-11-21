@@ -1,5 +1,12 @@
 import { Injectable } from '@nestjs/common';
-import { ListingStatus, Prisma, ReportStatus, VerificationStatus } from '@prisma/client';
+import {
+  EventStatus,
+  ListingStatus,
+  OpportunityStatus,
+  Prisma,
+  ReportStatus,
+  VerificationStatus,
+} from '@prisma/client';
 import { DEFAULT_PAGE_SIZE, keysetWhere, sliceWithCursor } from '../../common/utils/pagination';
 import { PrismaService } from '../../database/prisma.service';
 import { QueryAuditLogsDto } from './dto/admin-content.dto';
@@ -37,6 +44,11 @@ export class AdminStatsService {
       messages7,
       signupsByDay,
       postsByDay,
+      opportunitiesByStatus,
+      eventsByStatus,
+      ppaReviewsTotal,
+      ppaReviewsNew7,
+      ppasTotal,
     ] = await Promise.all([
       this.prisma.user.count(),
       this.prisma.user.count({ where: { isActive: true } }),
@@ -61,14 +73,28 @@ export class AdminStatsService {
       this.prisma.$queryRaw<{ day: Date; count: number }[]>`
         SELECT date_trunc('day', "createdAt") AS day, COUNT(*)::int AS count
         FROM posts WHERE "createdAt" > ${since14} GROUP BY 1 ORDER BY 1`,
+      this.prisma.opportunity.groupBy({ by: ['status'], _count: { _all: true } }),
+      this.prisma.event.groupBy({ by: ['status'], _count: { _all: true } }),
+      this.prisma.ppaReview.count(),
+      this.prisma.ppaReview.count({ where: { createdAt: { gt: since7 } } }),
+      this.prisma.ppa.count({ where: { reviewCount: { gt: 0 } } }),
     ]);
 
     const listing = (status: ListingStatus) =>
       listingsByStatus.find((l) => l.status === status)?._count._all ?? 0;
 
+    const opportunity = (status: OpportunityStatus) =>
+      opportunitiesByStatus.find((o) => o.status === status)?._count._all ?? 0;
+    const event = (status: EventStatus) => eventsByStatus.find((e) => e.status === status)?._count._all ?? 0;
+
     return {
       // Things that need an admin's attention right now.
-      needsAttention: { pendingReports, pendingVerifications },
+      needsAttention: {
+        pendingReports,
+        pendingVerifications,
+        pendingOpportunities: opportunity(OpportunityStatus.PENDING),
+        pendingEvents: event(EventStatus.PENDING),
+      },
       users: {
         total: usersTotal,
         active: usersActive,
@@ -89,6 +115,21 @@ export class AdminStatsService {
       },
       groups: { total: groupsTotal },
       explore: { total: exploreTotal },
+      opportunities: {
+        open: opportunity(OpportunityStatus.OPEN),
+        pending: opportunity(OpportunityStatus.PENDING),
+        closed: opportunity(OpportunityStatus.CLOSED),
+        rejected: opportunity(OpportunityStatus.REJECTED),
+        removed: opportunity(OpportunityStatus.REMOVED),
+      },
+      events: {
+        published: event(EventStatus.PUBLISHED),
+        pending: event(EventStatus.PENDING),
+        cancelled: event(EventStatus.CANCELLED),
+        rejected: event(EventStatus.REJECTED),
+        removed: event(EventStatus.REMOVED),
+      },
+      ppaReviews: { total: ppaReviewsTotal, newLast7Days: ppaReviewsNew7, ppasWithReviews: ppasTotal },
       messages: { last7Days: messages7 },
       // One row per day (UTC) for the last 14 days, days with nothing are left out.
       signupsByDay: signupsByDay.map((r) => ({ day: r.day, count: r.count })),

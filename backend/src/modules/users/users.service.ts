@@ -12,6 +12,7 @@ import { DEFAULT_PAGE_SIZE, keysetWhere, sliceWithCursor } from '../../common/ut
 import { PrismaService } from '../../database/prisma.service';
 import { ModerationService } from '../moderation/moderation.service';
 import { postInclude, presentPost, visibleRepostWhere } from '../posts/post-presenter';
+import { lockPpas, recomputePpaAggregates } from '../ppa/ppa-aggregates';
 import { UploadsService } from '../uploads/uploads.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 
@@ -271,6 +272,7 @@ export class UsersService {
           where: { publicId: { not: null } },
           select: { publicId: true, resourceType: true },
         },
+        eventsCreated: { where: { coverImageUrl: { not: null } }, select: { coverImageUrl: true } },
       },
     });
 
@@ -294,7 +296,7 @@ export class UsersService {
         // account, but the totals stored on other people's posts, polls and
         // groups would keep counting them. Note what is affected first, then
         // recount those rows after the deletion.
-        const [liked, commented, reposted, voted, joined] = await Promise.all([
+        const [liked, commented, reposted, voted, joined, rsvps, reviews] = await Promise.all([
           tx.like.findMany({ where: { userId }, select: { postId: true } }),
           tx.comment.findMany({ where: { authorId: userId }, select: { postId: true } }),
           tx.post.findMany({
@@ -303,7 +305,14 @@ export class UsersService {
           }),
           tx.pollVote.findMany({ where: { userId }, select: { optionId: true } }),
           tx.groupMember.findMany({ where: { userId }, select: { groupId: true } }),
+          tx.eventRsvp.findMany({ where: { userId }, select: { eventId: true } }),
+          tx.ppaReview.findMany({ where: { authorId: userId }, select: { ppaId: true } }),
         ]);
+
+        // The PPAs this person reviewed are locked until the totals are
+        // rebuilt, so a new review at the same moment is not lost.
+        const ppaIds = [...new Set(reviews.map((r) => r.ppaId))];
+        await lockPpas(tx, ppaIds);
 
         // A plain repost of this person's post would turn into an empty post
         // once the original is gone, so those go too (quote posts stay).
@@ -322,6 +331,7 @@ export class UsersService {
         ];
         const optionIds = [...new Set(voted.map((v) => v.optionId))];
         const groupIds = [...new Set(joined.map((g) => g.groupId))];
+        const eventIds = [...new Set(rsvps.map((r) => r.eventId))];
 
         if (postIds.length > 0) {
           await tx.$executeRaw`
@@ -345,12 +355,27 @@ export class UsersService {
               "memberCount" = (SELECT count(*) FROM "group_members" m WHERE m."groupId" = g."id")
             WHERE g."id" = ANY(${groupIds}::text[])`;
         }
+
+        // RSVPs to other people's events disappear with the account.
+        if (eventIds.length > 0) {
+          await tx.$executeRaw`
+            UPDATE "events" e SET
+              "rsvpCount" = (SELECT count(*) FROM "event_rsvps" r WHERE r."eventId" = e."id")
+            WHERE e."id" = ANY(${eventIds}::text[])`;
+        }
+
+        // Reviews disappear too, and the PPA totals are rebuilt without them.
+        await recomputePpaAggregates(tx, ppaIds);
       },
       { timeout: 30000 },
     );
 
     // Files are cleaned up afterwards; a failure here does not undo the deletion.
     await this.uploadsService.deleteByUrl(user.avatarUrl);
+
+    for (const event of user.eventsCreated) {
+      await this.uploadsService.deleteByUrl(event.coverImageUrl);
+    }
 
     for (const doc of user.verificationDocuments) {
       if (doc.publicId) {

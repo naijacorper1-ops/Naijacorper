@@ -25,7 +25,8 @@ because a list written here goes out of date. Use these instead:
 - docs/API_REFERENCE.md: every endpoint in plain language
 - docs/openapi.json: a saved copy of the API description
 - docs/ADMIN_GUIDE.md: the admin endpoints and how to run the admin side
-- docs/PATCH_NOTES.md: what changed in each patch, and notes for the frontend
+- docs/PATCH_NOTES.md: what changed in patch 2, and notes for the frontend
+- docs/PATCH_NOTES_3.md: patch 3 (opportunities, events, PPA reviews), the rules, and notes for the frontend
 - docs/backfill.sql: one-time SQL that existing databases needed after patch 2
 
 When endpoints change, update docs/API_REFERENCE.md and replace docs/openapi.json
@@ -76,6 +77,8 @@ Never commit real values. The app refuses to start if a required one is missing.
 | npm run build | Compiles to the dist folder. |
 | npm run start | Runs the compiled app (node dist/main). This is what Render runs. |
 | npm run prisma:migrate:deploy | Applies pending migrations. Safe to repeat. |
+| npm test | Runs the unit tests. No database needed. |
+| npm run test:e2e | Runs the end-to-end tests. Needs a separate test database, see test/README.md. They refuse to run against anything else. |
 | npx prisma migrate status | Shows which migrations are applied. |
 | npx ts-node src/scripts/create-admin.ts email username "Full Name" | Creates the first admin, or promotes an existing account. The password is typed at a hidden prompt. |
 
