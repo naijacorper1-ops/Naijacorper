@@ -17,7 +17,7 @@ Backend API for NaijaCorper. All paths start with **/api/v1**.
 Posting media, selling, creating groups and sending a verification document need a verified email. Those calls answer **403** with \`code: "EMAIL_NOT_VERIFIED"\`. Show a "verify your email" prompt. Codes are sent by **POST /auth/register** and **POST /auth/resend-verification**.
 
 ## Who may post what
-Opportunities, events and PPA reviews are not open to everyone. When someone is not allowed, the call answers **403** with a \`code\` you can show a message for: \`EMAIL_NOT_VERIFIED\` (verify the email first), \`VERIFICATION_REQUIRED\` (a corps member must get the verified badge first) or \`ROLE_NOT_ALLOWED\` (this account type cannot do it). Opportunities and events that need approval are saved as \`PENDING\` and are visible only to their owner and admins until an admin approves them.
+Opportunities, events and PPA reviews are not open to everyone. When someone is not allowed, the call answers **403** with a \`code\` you can show a message for: \`EMAIL_NOT_VERIFIED\` (verify the email first), \`VERIFICATION_REQUIRED\` (a corps member must get the verified badge first) or \`ROLE_NOT_ALLOWED\` (this account type cannot do it). Only admins publish opportunities and events directly. Everything else an allowed person posts is saved as \`PENDING\` and is visible only to its owner and admins until an admin approves it. Editing an approved post sends it back for approval (admin edits never do).
 
 ## Lists and pages
 List calls take \`pageSize\` (1 to 50, default 20) and \`cursor\`. The answer has a \`nextCursor\`. Send it back unchanged to get the next page. \`null\` means there are no more pages. Never build or edit a cursor yourself.
@@ -50,7 +50,7 @@ const TAGS: Record<string, string> = {
   groups: 'Groups people can join and post in.',
   hashtags: 'Trending tags, tag search and posts by tag.',
   uploads: 'File uploads. Upload first, then use the returned url.',
-  opportunities: 'Jobs, internships, scholarships, grants and more. Posted by recruiters, businesses, admins and verified corps members (the last need approval).',
+  opportunities: 'Jobs, internships, scholarships, grants and more. Posted by admins, or by recruiters, businesses and verified corps members after an admin approves them.',
   events: 'Corps meetups, trainings and networking. RSVP, cancel and organizer tools. New events need admin approval.',
   ppas: 'Anonymous-by-default reviews of places of primary assignment, written by verified corps members.',
   reports: 'Report a post, user, comment, listing, group, opportunity, event or PPA review.',
@@ -159,7 +159,7 @@ const SUMMARIES: Record<string, string> = {
   'GET /api/v1/groups/{group}/members': 'Members of a group',
   'GET /api/v1/groups/{group}/posts': 'Posts inside a group',
 
-  'POST /api/v1/opportunities': 'Post an opportunity (live at once, or waiting for approval)',
+  'POST /api/v1/opportunities': 'Post an opportunity (admins go live at once, everyone else waits for approval)',
   'GET /api/v1/opportunities': 'Browse and search open opportunities',
   'GET /api/v1/opportunities/mine': 'Your own opportunities in every status',
   'GET /api/v1/opportunities/{id}': 'Get one opportunity',
@@ -247,12 +247,12 @@ const DETAILS: Record<string, string> = {
   'POST /api/v1/reports': 'Reasons are free text (up to 500 characters). You cannot report yourself, and a repeat report of the same item is refused.',
   'POST /api/v1/uploads/event-cover': 'Needs a verified email. JPG, PNG, GIF or WebP up to 8 MB. Response: `{ "url": "..." }`. Send the url as `coverImageUrl` when creating or editing an event.',
   'POST /api/v1/opportunities':
-    'Admins, recruiters and businesses (verified email) publish at once: status `OPEN`. Verified corps members (verified email and verified badge) are saved as `PENDING` until an admin approves. Others get 403 with a `code`. `deadline` can be a date (`2026-12-31`, counted to the end of that day in Nigerian time) or a full date and time. `applyUrl` must be an https link. Pay is whole naira. At most 10 posts waiting for review and 50 open or pending posts per person.',
+    'Admins publish at once: status `OPEN`. Recruiters and businesses (verified email) and verified corps members (verified email and verified badge) are saved as `PENDING` until an admin approves. Others get 403 with a `code`. `deadline` can be a date (`2026-12-31`, counted to the end of that day in Nigerian time) or a full date and time. `applyUrl` must be an https link. Pay is whole naira. At most 10 posts waiting for review and 50 open or pending posts per person.',
   'GET /api/v1/opportunities':
     'Only `OPEN` opportunities from active posters whose deadline has not passed. Newest first. Filters: `type`, `state` (exact state), `mode`, `employmentType`, `q` (title, organization, description). Closed opportunities are not listed but can still be opened by link.',
   'GET /api/v1/opportunities/mine': 'Every status. Filter with `status`. Rejected and removed posts include the reason.',
   'GET /api/v1/opportunities/{id}': 'Open and closed opportunities are visible to everyone. Pending, rejected and removed ones are visible only to the owner and admins (404 for everyone else). `isMine` tells you if it is yours.',
-  'PATCH /api/v1/opportunities/{id}': 'Send only what changes. Send `null` to clear an optional field. An edit by a corps member sends an approved post back to `PENDING`, and editing a rejected post resubmits it. Posts by recruiters and businesses stay live, and admin edits never go back for review. A removed post cannot be edited by its owner.',
+  'PATCH /api/v1/opportunities/{id}': 'Send only what changes. Send `null` to clear an optional field. An edit by anyone except an admin sends an approved post back to `PENDING`, and editing a rejected post resubmits it. Admin edits never go back for review. A removed post cannot be edited by its owner.',
   'PATCH /api/v1/opportunities/{id}/status': 'Body `{ "status": "CLOSED" }` for an open post or `{ "status": "OPEN" }` for a closed one. Does not go back for review.',
   'DELETE /api/v1/opportunities/{id}': 'Only the owner. A post removed by a moderator cannot be deleted.',
   'POST /api/v1/events':

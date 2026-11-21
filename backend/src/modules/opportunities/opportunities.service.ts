@@ -237,10 +237,9 @@ export class OpportunitiesService {
     const max = 'compensationMax' in data ? (data.compensationMax as number | null) : existing.compensationMax;
     this.assertCompensation(min, max);
 
-    // An edit to a trusted post goes live as it is. An edit to something that
-    // was submitted for approval goes back to the queue, and so does editing a
-    // rejected post (that is how it is resubmitted). Admin edits never
-    // re-queue.
+    // Everything a non-admin posts needs approval, so an edit goes back to the
+    // queue, and so does editing a rejected post (that is how it is
+    // resubmitted). Admin edits never re-queue.
     if (!isAdmin) {
       const publisher = await loadPublisher(this.prisma, viewer.id);
 

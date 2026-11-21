@@ -28,7 +28,7 @@ Notes:
 | | Opportunities | Events | PPA reviews |
 |---|---|---|---|
 | Admin | Live at once | Live at once | Cannot review |
-| Recruiter, business | Live at once (verified email needed) | Waits for approval (verified email needed) | Cannot review |
+| Recruiter, business | Waits for approval (verified email needed) | Waits for approval (verified email needed) | Cannot review |
 | Verified serving or ex corps member (verified badge and verified email) | Waits for approval | Waits for approval | Can review |
 | Anyone else | 403 | 403 | 403 |
 
@@ -73,7 +73,7 @@ Also changed
 Approval and visibility
 - A pending or rejected item, and a removed opportunity or event, returns 404 to everyone except the person who made it and admins.
 - A closed opportunity and a cancelled event can still be opened by link, but they are left out of the public lists.
-- Editing: a corps member's opportunity, or any event made by a non-admin, goes back to PENDING after an edit. A recruiter's or business's opportunity does not. Editing a rejected item sends it back for review. Admin edits never do. A removed item cannot be edited by its owner.
+- Editing: any opportunity or event made by a non-admin goes back to PENDING after an edit. Editing a rejected item sends it back for review. Admin edits never do. A removed item cannot be edited by its owner.
 - Limits per person: opportunities, 10 waiting for review and 50 live. Events, 10 waiting for review and 30 upcoming.
 
 Opportunities

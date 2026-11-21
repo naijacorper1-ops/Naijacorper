@@ -22,10 +22,10 @@ describe('decideOpportunityPublishing', () => {
     });
   });
 
-  it.each([UserRole.RECRUITER, UserRole.BUSINESS])('lets a %s with a verified email publish at once', (role) => {
+  it.each([UserRole.RECRUITER, UserRole.BUSINESS])('queues a %s with a verified email for approval', (role) => {
     expect(decideOpportunityPublishing(user({ role, isVerified: false }))).toEqual({
       allowed: true,
-      mode: 'PUBLISH',
+      mode: 'SUBMIT',
     });
   });
 
