@@ -13,7 +13,7 @@ Backend API for NaijaCorper. All paths start with **/api/v1**.
 Posting media, selling, creating groups and sending a verification document need a verified email. Those calls answer **403** with `code: "EMAIL_NOT_VERIFIED"`. Show a "verify your email" prompt. Codes are sent by **POST /auth/register** and **POST /auth/resend-verification**.
 
 ## Who may post what
-Opportunities, events and PPA reviews are not open to everyone. When someone is not allowed, the call answers **403** with a `code` you can show a message for: `EMAIL_NOT_VERIFIED` (verify the email first), `VERIFICATION_REQUIRED` (a corps member must get the verified badge first) or `ROLE_NOT_ALLOWED` (this account type cannot do it). Opportunities and events that need approval are saved as `PENDING` and are visible only to their owner and admins until an admin approves them.
+Opportunities, events and PPA reviews are not open to everyone. When someone is not allowed, the call answers **403** with a `code` you can show a message for: `EMAIL_NOT_VERIFIED` (verify the email first), `VERIFICATION_REQUIRED` (a corps member must get the verified badge first) or `ROLE_NOT_ALLOWED` (this account type cannot do it). Only admins publish opportunities and events directly. Everything else an allowed person posts is saved as `PENDING` and is visible only to its owner and admins until an admin approves it. Editing an approved post sends it back for approval (admin edits never do).
 
 ## Lists and pages
 List calls take `pageSize` (1 to 50, default 20) and `cursor`. The answer has a `nextCursor`. Send it back unchanged to get the next page. `null` means there are no more pages. Never build or edit a cursor yourself.
@@ -1435,16 +1435,16 @@ Possible errors: 400, 401, 403, 429
 
 ## opportunities
 
-Jobs, internships, scholarships, grants and more. Posted by recruiters, businesses, admins and verified corps members (the last need approval).
+Jobs, internships, scholarships, grants and more. Posted by admins, or by recruiters, businesses and verified corps members after an admin approves them.
 
 
 ### POST /opportunities
 
-**Post an opportunity (live at once, or waiting for approval)**  
+**Post an opportunity (admins go live at once, everyone else waits for approval)**  
 Needs sign in
 
 
-Admins, recruiters and businesses (verified email) publish at once: status `OPEN`. Verified corps members (verified email and verified badge) are saved as `PENDING` until an admin approves. Others get 403 with a `code`. `deadline` can be a date (`2026-12-31`, counted to the end of that day in Nigerian time) or a full date and time. `applyUrl` must be an https link. Pay is whole naira. At most 10 posts waiting for review and 50 open or pending posts per person.
+Admins publish at once: status `OPEN`. Recruiters and businesses (verified email) and verified corps members (verified email and verified badge) are saved as `PENDING` until an admin approves. Others get 403 with a `code`. `deadline` can be a date (`2026-12-31`, counted to the end of that day in Nigerian time) or a full date and time. `applyUrl` must be an https link. Pay is whole naira. At most 10 posts waiting for review and 50 open or pending posts per person.
 
 
 Body (JSON):
@@ -1532,7 +1532,7 @@ Possible errors: 400, 401, 404, 429
 Needs sign in
 
 
-Send only what changes. Send `null` to clear an optional field. An edit by a corps member sends an approved post back to `PENDING`, and editing a rejected post resubmits it. Posts by recruiters and businesses stay live, and admin edits never go back for review. A removed post cannot be edited by its owner.
+Send only what changes. Send `null` to clear an optional field. An edit by anyone except an admin sends an approved post back to `PENDING`, and editing a rejected post resubmits it. Admin edits never go back for review. A removed post cannot be edited by its owner.
 
 
 Path: `id`

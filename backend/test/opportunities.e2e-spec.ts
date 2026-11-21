@@ -37,6 +37,14 @@ describe('Opportunities', () => {
   const post = (user: TestUser, data: Record<string, unknown> = body()) =>
     ctx.http().post('/api/v1/opportunities').set(auth(user)).send(data);
 
+  // A recruiter's or business's post waits for approval like everyone else's.
+  // This submits it and approves it as the admin, and returns the id.
+  const postLive = async (user: TestUser, data: Record<string, unknown> = body()) => {
+    const id = (await post(user, data).expect(201)).body.id as string;
+    await ctx.http().patch(`/api/v1/admin/opportunities/${id}/decision`).set(auth(admin)).send({ decision: 'APPROVE' }).expect(200);
+    return id;
+  };
+
   const list = (user: TestUser, query = '') =>
     ctx.http().get(`/api/v1/opportunities${query}`).set(auth(user));
 
@@ -76,10 +84,18 @@ describe('Opportunities', () => {
       expect(res.body.postedBy.username).toBe(corper.username);
     });
 
-    it('publishes a recruiter and an admin straight away', async () => {
-      const fromRecruiter = await post(recruiter).expect(201);
+    it('queues a recruiter and a business for approval', async () => {
+      const business = await ctx.makeUser({ role: UserRole.BUSINESS, isVerified: false });
+
+      for (const user of [recruiter, business]) {
+        const res = await post(user).expect(201);
+        expect(res.body.status).toBe('PENDING');
+        expect(res.body.isMine).toBe(true);
+      }
+    });
+
+    it('publishes only an admin straight away', async () => {
       const fromAdmin = await post(admin).expect(201);
-      expect(fromRecruiter.body.status).toBe('OPEN');
       expect(fromAdmin.body.status).toBe('OPEN');
     });
   });
@@ -124,7 +140,7 @@ describe('Opportunities', () => {
 
     beforeAll(async () => {
       pending = (await post(corper, body({ title: 'Pending visibility job' })).expect(201)).body.id;
-      open = (await post(recruiter, body({ title: 'Open visibility job' })).expect(201)).body.id;
+      open = await postLive(recruiter, body({ title: 'Open visibility job' }));
     });
 
     it('keeps a pending opportunity out of the public list and hides it from others', async () => {
@@ -175,7 +191,7 @@ describe('Opportunities', () => {
     it('hides opportunities from a poster who has blocked the viewer', async () => {
       const blocker = await ctx.makeUser({ role: UserRole.RECRUITER });
       const blocked = await ctx.makeUser({ role: UserRole.EX_CORPER });
-      const created = (await post(blocker, body({ title: 'Blocker only job' })).expect(201)).body.id;
+      const created = await postLive(blocker, body({ title: 'Blocker only job' }));
 
       await ctx.http().post(`/api/v1/users/${blocker.id}/block`).set(auth(blocked)).expect(201);
 
@@ -186,7 +202,7 @@ describe('Opportunities', () => {
 
     it('hides opportunities from a deactivated poster', async () => {
       const gone = await ctx.makeUser({ role: UserRole.RECRUITER });
-      await post(gone, body({ title: 'Deactivated poster job' })).expect(201);
+      await postLive(gone, body({ title: 'Deactivated poster job' }));
       await ctx.prisma.user.update({ where: { id: gone.id }, data: { isActive: false } });
 
       const res = await list(viewer, '?q=Deactivated%20poster').expect(200);
@@ -196,8 +212,8 @@ describe('Opportunities', () => {
 
   describe('searching and filtering', () => {
     beforeAll(async () => {
-      await post(recruiter, body({ title: 'Scholarship for graduates', type: 'SCHOLARSHIP', state: 'Oyo', mode: 'HYBRID', organization: 'Zebra Foundation' })).expect(201);
-      await post(recruiter, body({ title: 'Remote copywriter', type: 'FREELANCE', state: undefined, mode: 'REMOTE', employmentType: 'CONTRACT', organization: 'Quill Co' })).expect(201);
+      await postLive(recruiter, body({ title: 'Scholarship for graduates', type: 'SCHOLARSHIP', state: 'Oyo', mode: 'HYBRID', organization: 'Zebra Foundation' }));
+      await postLive(recruiter, body({ title: 'Remote copywriter', type: 'FREELANCE', state: undefined, mode: 'REMOTE', employmentType: 'CONTRACT', organization: 'Quill Co' }));
     });
 
     it('filters by type, state, mode and employment type', async () => {
@@ -327,7 +343,7 @@ describe('Opportunities', () => {
     });
 
     it('does not decide something that is not pending', async () => {
-      const open = (await post(recruiter, body({ title: 'Already open' })).expect(201)).body.id;
+      const open = await postLive(recruiter, body({ title: 'Already open' }));
       await ctx.http().patch(`/api/v1/admin/opportunities/${open}/decision`).set(auth(admin)).send({ decision: 'APPROVE' }).expect(409);
       await ctx.http().patch('/api/v1/admin/opportunities/nope/decision').set(auth(admin)).send({ decision: 'APPROVE' }).expect(404);
     });
@@ -354,20 +370,22 @@ describe('Opportunities', () => {
       expect(res.body.rejectionReason).toBeNull();
     });
 
-    it('keeps a recruiter\'s edit live', async () => {
-      const id = (await post(recruiter, body({ title: 'Recruiter edit' })).expect(201)).body.id;
+    it('sends an edited, approved recruiter post back for review', async () => {
+      const id = await postLive(recruiter, body({ title: 'Recruiter edit' }));
       const res = await ctx.http().patch(`/api/v1/opportunities/${id}`).set(auth(recruiter)).send({ title: 'Recruiter edited' }).expect(200);
-      expect(res.body.status).toBe('OPEN');
+      expect(res.body.status).toBe('PENDING');
+
+      await ctx.http().get(`/api/v1/opportunities/${id}`).set(auth(viewer)).expect(404);
     });
 
     it('does not re-queue an admin\'s edit, even of someone else\'s post', async () => {
-      const id = (await post(recruiter, body({ title: 'Admin will edit' })).expect(201)).body.id;
+      const id = await postLive(recruiter, body({ title: 'Admin will edit' }));
       const res = await ctx.http().patch(`/api/v1/opportunities/${id}`).set(auth(admin)).send({ title: 'Fixed by admin' }).expect(200);
       expect(res.body.status).toBe('OPEN');
     });
 
     it('only lets the owner (or an admin) edit', async () => {
-      const id = (await post(recruiter, body({ title: 'Not yours' })).expect(201)).body.id;
+      const id = await postLive(recruiter, body({ title: 'Not yours' }));
       await ctx.http().patch(`/api/v1/opportunities/${id}`).set(auth(corper)).send({ title: 'Hijack' }).expect(403);
     });
 
@@ -377,7 +395,7 @@ describe('Opportunities', () => {
     });
 
     it('clears an optional field with null and rejects an empty body', async () => {
-      const id = (await post(recruiter, body({ title: 'Clear me', duration: '6 months' })).expect(201)).body.id;
+      const id = await postLive(recruiter, body({ title: 'Clear me', duration: '6 months' }));
       const res = await ctx.http().patch(`/api/v1/opportunities/${id}`).set(auth(recruiter)).send({ duration: null }).expect(200);
       expect(res.body.duration).toBeNull();
 
@@ -387,14 +405,14 @@ describe('Opportunities', () => {
     });
 
     it('checks the pay range against what is already saved', async () => {
-      const id = (await post(recruiter, body({ title: 'Pay range', compensationMin: 100000, compensationMax: 200000 })).expect(201)).body.id;
+      const id = await postLive(recruiter, body({ title: 'Pay range', compensationMin: 100000, compensationMax: 200000 }));
       await ctx.http().patch(`/api/v1/opportunities/${id}`).set(auth(recruiter)).send({ compensationMax: 50000 }).expect(400);
     });
   });
 
   describe('closing, deleting and removal', () => {
     it('closes a post: still reachable by link, gone from the list, can be reopened', async () => {
-      const id = (await post(recruiter, body({ title: 'Closable job' })).expect(201)).body.id;
+      const id = await postLive(recruiter, body({ title: 'Closable job' }));
 
       const closed = await ctx.http().patch(`/api/v1/opportunities/${id}/status`).set(auth(recruiter)).send({ status: 'CLOSED' }).expect(200);
       expect(closed.body.status).toBe('CLOSED');
@@ -419,7 +437,7 @@ describe('Opportunities', () => {
     });
 
     it('hides a post whose deadline has passed from the list, but not from its link', async () => {
-      const id = (await post(recruiter, body({ title: 'Deadline passed job', deadline: inDays(5).toISOString() })).expect(201)).body.id;
+      const id = await postLive(recruiter, body({ title: 'Deadline passed job', deadline: inDays(5).toISOString() }));
       await ctx.prisma.opportunity.update({ where: { id }, data: { deadline: new Date(Date.now() - 1000) } });
 
       const listed = await list(viewer, '?q=Deadline%20passed').expect(200);
@@ -428,14 +446,14 @@ describe('Opportunities', () => {
     });
 
     it('lets the owner delete their own post and nobody else', async () => {
-      const id = (await post(recruiter, body({ title: 'Deletable' })).expect(201)).body.id;
+      const id = await postLive(recruiter, body({ title: 'Deletable' }));
       await ctx.http().delete(`/api/v1/opportunities/${id}`).set(auth(corper)).expect(404);
       await ctx.http().delete(`/api/v1/opportunities/${id}`).set(auth(recruiter)).expect(200);
       await ctx.http().get(`/api/v1/opportunities/${id}`).set(auth(admin)).expect(404);
     });
 
     it('removes and restores as an admin, telling the poster and keeping the record', async () => {
-      const id = (await post(recruiter, body({ title: 'Removable job' })).expect(201)).body.id;
+      const id = await postLive(recruiter, body({ title: 'Removable job' }));
 
       await ctx.http().patch(`/api/v1/admin/opportunities/${id}/remove`).set(auth(recruiter)).send({ reason: 'spam' }).expect(403);
       await ctx.http().patch(`/api/v1/admin/opportunities/${id}/remove`).set(auth(admin)).send({}).expect(400);
@@ -451,8 +469,10 @@ describe('Opportunities', () => {
       await ctx.http().patch(`/api/v1/opportunities/${id}`).set(auth(recruiter)).send({ title: 'Sneaky edit' }).expect(403);
       await ctx.http().delete(`/api/v1/opportunities/${id}`).set(auth(recruiter)).expect(403);
 
-      const note = await ctx.prisma.notification.findFirst({ where: { recipientId: recruiter.id, opportunityId: id } });
-      expect(note?.type).toBe(NotificationType.CONTENT_REMOVED);
+      const note = await ctx.prisma.notification.findFirst({
+        where: { recipientId: recruiter.id, opportunityId: id, type: NotificationType.CONTENT_REMOVED },
+      });
+      expect(note).not.toBeNull();
       expect(note?.message).toContain('This is spam');
 
       await ctx.http().patch(`/api/v1/admin/opportunities/${id}/restore`).set(auth(admin)).send({}).expect(200);
@@ -463,7 +483,7 @@ describe('Opportunities', () => {
 
   describe('reports', () => {
     it('lets a user report a public post, and an admin remove it from the report', async () => {
-      const id = (await post(recruiter, body({ title: 'Reportable job' })).expect(201)).body.id;
+      const id = await postLive(recruiter, body({ title: 'Reportable job' }));
 
       const report = await ctx
         .http()

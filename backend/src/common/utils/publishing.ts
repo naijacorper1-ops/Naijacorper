@@ -44,9 +44,9 @@ const ROLE_DENIED: PublishDecision = {
 
 const CORPS_MEMBER_ROLES: UserRole[] = [UserRole.SERVING_CORPER, UserRole.EX_CORPER];
 
-// Admins, recruiters and businesses publish opportunities directly (recruiters
-// and businesses need a verified email). Verified corps members may suggest
-// one, which an admin approves first.
+// Only admins publish opportunities directly. Recruiters and businesses
+// (verified email) and verified corps members submit them, and an admin
+// approves each one first.
 export function decideOpportunityPublishing(user: Publisher): PublishDecision {
   if (!user.isActive) {
     return ROLE_DENIED;
@@ -57,7 +57,7 @@ export function decideOpportunityPublishing(user: Publisher): PublishDecision {
   }
 
   if (user.role === UserRole.RECRUITER || user.role === UserRole.BUSINESS) {
-    return user.emailVerified ? { allowed: true, mode: 'PUBLISH' } : EMAIL_DENIED;
+    return user.emailVerified ? { allowed: true, mode: 'SUBMIT' } : EMAIL_DENIED;
   }
 
   if (CORPS_MEMBER_ROLES.includes(user.role)) {

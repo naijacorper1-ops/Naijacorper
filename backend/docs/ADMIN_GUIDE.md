@@ -81,7 +81,7 @@ Every route below needs an admin token. A normal user gets 403.
 
 ### Opportunities, events and PPA reviews
 
-These three have their own queues. Anything a verified corps member (or, for events, a recruiter or business) submits waits here as PENDING until an admin decides.
+These three have their own queues. Only admins publish directly. Anything a verified corps member, recruiter or business submits waits here as PENDING until an admin decides.
 
 Opportunities
 - `GET /admin/opportunities?status=PENDING|OPEN|CLOSED|REJECTED|REMOVED|ALL&q=&type=&postedById=`: pending ones come oldest first.
@@ -106,7 +106,7 @@ PPA reviews
 How it behaves
 - Decisions are atomic. If two admins act on the same item at the same time, one wins and the other gets a 409.
 - Approving, rejecting and removing notify the poster. All four actions (including restore) are written to the audit log (`OPPORTUNITY_APPROVED`, `EVENT_REMOVED`, `PPA_REVIEW_REMOVED` and so on).
-- When a corps member or an event creator edits an approved item, it goes back to PENDING. An admin's own edits never do. Recruiters and businesses are not re-queued for their opportunities.
+- When a corps member or an event creator edits an approved item, it goes back to PENDING. An admin's own edits never do. This applies to recruiters and businesses too.
 - Rejected items can be edited by the owner, and saving the edit sends them back to PENDING.
 - Pending, rejected and removed items are invisible to everyone except the owner and admins (404).
 - Reports about an opportunity (open or closed), a published or cancelled event, or a PPA review show up in the normal reports queue, with a copy of the content. For a PPA review report the copy includes the author id, which only admins can see.
