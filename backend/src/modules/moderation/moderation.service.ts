@@ -5,7 +5,13 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, ReportStatus, ReportTargetType } from '@prisma/client';
+import {
+  EventStatus,
+  OpportunityStatus,
+  Prisma,
+  ReportStatus,
+  ReportTargetType,
+} from '@prisma/client';
 import { PUBLIC_USER_SELECT } from '../../common/selects';
 import { PrismaService } from '../../database/prisma.service';
 import { CreateReportDto } from './dto/create-report.dto';
@@ -311,6 +317,123 @@ export class ModerationService {
           description: group.description,
           createdById: group.createdById,
           createdByUsername: group.createdBy.username,
+        },
+      };
+    }
+
+    // Opportunities and events can only be reported while they are public, so
+    // a report cannot be used to find out that a hidden item exists.
+    if (targetType === ReportTargetType.OPPORTUNITY) {
+      const opportunity = await this.prisma.opportunity.findFirst({
+        where: {
+          id: targetId,
+          status: { in: [OpportunityStatus.OPEN, OpportunityStatus.CLOSED] },
+        },
+        select: {
+          title: true,
+          organization: true,
+          description: true,
+          type: true,
+          status: true,
+          applyUrl: true,
+          applyEmail: true,
+          postedById: true,
+          postedBy: { select: { username: true } },
+        },
+      });
+
+      if (!opportunity) {
+        throw new NotFoundException('Reported opportunity not found');
+      }
+
+      return {
+        ownerId: opportunity.postedById,
+        snapshot: {
+          title: opportunity.title,
+          organization: opportunity.organization,
+          description: opportunity.description,
+          type: opportunity.type,
+          status: opportunity.status,
+          applyUrl: opportunity.applyUrl,
+          applyEmail: opportunity.applyEmail,
+          postedById: opportunity.postedById,
+          postedByUsername: opportunity.postedBy.username,
+        },
+      };
+    }
+
+    if (targetType === ReportTargetType.EVENT) {
+      const event = await this.prisma.event.findFirst({
+        where: {
+          id: targetId,
+          status: { in: [EventStatus.PUBLISHED, EventStatus.CANCELLED] },
+        },
+        select: {
+          title: true,
+          description: true,
+          category: true,
+          status: true,
+          startsAt: true,
+          venue: true,
+          registrationUrl: true,
+          meetingUrl: true,
+          createdById: true,
+          createdBy: { select: { username: true } },
+        },
+      });
+
+      if (!event) {
+        throw new NotFoundException('Reported event not found');
+      }
+
+      return {
+        ownerId: event.createdById,
+        snapshot: {
+          title: event.title,
+          description: event.description,
+          category: event.category,
+          status: event.status,
+          startsAt: event.startsAt.toISOString(),
+          venue: event.venue,
+          registrationUrl: event.registrationUrl,
+          meetingUrl: event.meetingUrl,
+          createdById: event.createdById,
+          createdByUsername: event.createdBy.username,
+        },
+      };
+    }
+
+    // The snapshot holds the author for admins, even for an anonymous review.
+    // Reports are only ever shown to admins.
+    if (targetType === ReportTargetType.PPA_REVIEW) {
+      const review = await this.prisma.ppaReview.findUnique({
+        where: { id: targetId },
+        select: {
+          content: true,
+          overallRating: true,
+          isAnonymous: true,
+          ppaId: true,
+          authorId: true,
+          ppa: { select: { name: true, state: true } },
+          author: { select: { username: true } },
+        },
+      });
+
+      if (!review) {
+        throw new NotFoundException('Reported review not found');
+      }
+
+      return {
+        ownerId: review.authorId,
+        snapshot: {
+          content: review.content,
+          overallRating: review.overallRating,
+          isAnonymous: review.isAnonymous,
+          ppaId: review.ppaId,
+          ppaName: review.ppa.name,
+          ppaState: review.ppa.state,
+          authorId: review.authorId,
+          authorUsername: review.author.username,
         },
       };
     }

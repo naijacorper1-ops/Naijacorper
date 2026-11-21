@@ -26,4 +26,14 @@ export class UploadsController {
   uploadListingImage(@UploadedFile() file: Express.Multer.File) {
     return this.uploadsService.uploadListingImage(file);
   }
+
+  // Event covers need a verified email, like listing photos. Whether this
+  // account may create events at all is checked when the event is created.
+  @Post('event-cover')
+  @UseGuards(VerifiedEmailGuard)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @UseInterceptors(upload(8))
+  uploadEventCover(@UploadedFile() file: Express.Multer.File) {
+    return this.uploadsService.uploadEventCover(file);
+  }
 }

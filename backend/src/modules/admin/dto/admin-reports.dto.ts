@@ -27,7 +27,7 @@ export class ReportDecisionDto {
 
   // What to do about it. NONE (default) only closes the report.
   // REMOVE_CONTENT deletes the reported post, comment or group, or removes
-  // the listing. DEACTIVATE_USER deactivates the owner of the reported item.
+  // the listing, opportunity, event or PPA review. DEACTIVATE_USER deactivates the owner of the reported item.
   @ApiPropertyOptional({ enum: REPORT_ACTIONS })
   @IsOptional()
   @IsIn(REPORT_ACTIONS)

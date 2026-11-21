@@ -11,6 +11,7 @@ import { DEFAULT_PAGE_SIZE, keysetWhere, sliceWithCursor } from '../../common/ut
 import { PrismaService } from '../../database/prisma.service';
 import { AuditAction, AuditService } from '../audit/audit.service';
 import { AdminContentService } from './admin-content.service';
+import { AdminSubmissionsService } from './admin-submissions.service';
 import { AdminUsersService } from './admin-users.service';
 import { QueryReportsDto, ReportAction, ReportDecisionDto } from './dto/admin-reports.dto';
 
@@ -26,6 +27,7 @@ export class AdminReportsService {
     private prisma: PrismaService,
     private auditService: AuditService,
     private contentService: AdminContentService,
+    private submissionsService: AdminSubmissionsService,
     private usersService: AdminUsersService,
   ) {}
 
@@ -167,6 +169,12 @@ export class AdminReportsService {
           await this.contentService.removeListing(admin, targetId, note);
         } else if (targetType === ReportTargetType.GROUP) {
           await this.contentService.removeGroup(admin, targetId, note);
+        } else if (targetType === ReportTargetType.OPPORTUNITY) {
+          await this.submissionsService.removeOpportunity(admin, targetId, note);
+        } else if (targetType === ReportTargetType.EVENT) {
+          await this.submissionsService.removeEvent(admin, targetId, note);
+        } else if (targetType === ReportTargetType.PPA_REVIEW) {
+          await this.submissionsService.removePpaReview(admin, targetId, note);
         }
       } catch (error) {
         // Already gone (deleted by its owner) or already removed: nothing to do.
@@ -207,6 +215,12 @@ export class AdminReportsService {
         return (await this.prisma.listing.findUnique({ where: { id: targetId }, select: { sellerId: true } }))?.sellerId ?? null;
       case ReportTargetType.GROUP:
         return (await this.prisma.group.findUnique({ where: { id: targetId }, select: { createdById: true } }))?.createdById ?? null;
+      case ReportTargetType.OPPORTUNITY:
+        return (await this.prisma.opportunity.findUnique({ where: { id: targetId }, select: { postedById: true } }))?.postedById ?? null;
+      case ReportTargetType.EVENT:
+        return (await this.prisma.event.findUnique({ where: { id: targetId }, select: { createdById: true } }))?.createdById ?? null;
+      case ReportTargetType.PPA_REVIEW:
+        return (await this.prisma.ppaReview.findUnique({ where: { id: targetId }, select: { authorId: true } }))?.authorId ?? null;
       case ReportTargetType.USER:
         return (await this.prisma.user.findUnique({ where: { id: targetId }, select: { id: true } }))?.id ?? null;
     }
@@ -218,7 +232,7 @@ export class AdminReportsService {
       ...new Set(reports.filter((r) => r.targetType === type).map((r) => r.targetId)),
     ];
 
-    const [posts, comments, listings, groups, users, counts] = await Promise.all([
+    const [posts, comments, listings, groups, users, opportunities, events, ppaReviews, counts] = await Promise.all([
       this.prisma.post.findMany({
         where: { id: { in: idsOf('POST') } },
         select: {
@@ -268,6 +282,44 @@ export class AdminReportsService {
         where: { id: { in: idsOf('USER') } },
         select: { ...PUBLIC_USER_SELECT, email: true, bio: true, isActive: true, createdAt: true },
       }),
+      this.prisma.opportunity.findMany({
+        where: { id: { in: idsOf('OPPORTUNITY') } },
+        select: {
+          id: true,
+          title: true,
+          organization: true,
+          description: true,
+          type: true,
+          status: true,
+          removedReason: true,
+          postedBy: { select: PUBLIC_USER_SELECT },
+        },
+      }),
+      this.prisma.event.findMany({
+        where: { id: { in: idsOf('EVENT') } },
+        select: {
+          id: true,
+          title: true,
+          description: true,
+          category: true,
+          status: true,
+          startsAt: true,
+          removedReason: true,
+          createdBy: { select: PUBLIC_USER_SELECT },
+        },
+      }),
+      // Admins see the author of a review even when it is anonymous.
+      this.prisma.ppaReview.findMany({
+        where: { id: { in: idsOf('PPA_REVIEW') } },
+        select: {
+          id: true,
+          content: true,
+          overallRating: true,
+          isAnonymous: true,
+          ppa: { select: { id: true, name: true, state: true } },
+          author: { select: PUBLIC_USER_SELECT },
+        },
+      }),
       this.prisma.report.groupBy({
         by: ['targetType', 'targetId'],
         where: { targetId: { in: reports.map((r) => r.targetId) } },
@@ -281,6 +333,9 @@ export class AdminReportsService {
     listings.forEach((l) => live.set(`LISTING:${l.id}`, l));
     groups.forEach((g) => live.set(`GROUP:${g.id}`, g));
     users.forEach((u) => live.set(`USER:${u.id}`, u));
+    opportunities.forEach((o) => live.set(`OPPORTUNITY:${o.id}`, o));
+    events.forEach((e) => live.set(`EVENT:${e.id}`, e));
+    ppaReviews.forEach((r) => live.set(`PPA_REVIEW:${r.id}`, r));
 
     const totals = new Map(counts.map((c) => [`${c.targetType}:${c.targetId}`, c._count._all]));
 

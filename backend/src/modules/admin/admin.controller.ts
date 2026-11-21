@@ -8,6 +8,7 @@ import { AuthUser } from '../../common/types/auth-user';
 import { AdminContentService } from './admin-content.service';
 import { AdminReportsService } from './admin-reports.service';
 import { AdminStatsService } from './admin-stats.service';
+import { AdminSubmissionsService } from './admin-submissions.service';
 import { AdminUsersService } from './admin-users.service';
 import { AdminVerificationsService } from './admin-verifications.service';
 import {
@@ -17,6 +18,12 @@ import {
   QueryAuditLogsDto,
 } from './dto/admin-content.dto';
 import { QueryReportsDto, ReportDecisionDto } from './dto/admin-reports.dto';
+import {
+  QueryAdminEventsDto,
+  QueryAdminOpportunitiesDto,
+  QueryAdminPpaReviewsDto,
+  SubmissionDecisionDto,
+} from './dto/admin-submissions.dto';
 import { ChangeRoleDto, QueryAdminUsersDto, SetVerificationDto } from './dto/admin-users.dto';
 import { QueryVerificationsDto, VerificationDecisionDto } from './dto/admin-verifications.dto';
 import { OptionalReasonDto, RequiredReasonDto } from './dto/reason.dto';
@@ -34,6 +41,7 @@ export class AdminController {
     private verificationsService: AdminVerificationsService,
     private reportsService: AdminReportsService,
     private contentService: AdminContentService,
+    private submissionsService: AdminSubmissionsService,
   ) {}
 
   // Dashboard
@@ -182,5 +190,80 @@ export class AdminController {
   @Delete('explore/:id')
   deleteExploreEntry(@CurrentUser() admin: AuthUser, @Param('id') id: string, @Body() dto: OptionalReasonDto) {
     return this.contentService.removeExploreEntry(admin, id, dto.reason);
+  }
+
+  // Opportunities. status=PENDING is the approval queue.
+
+  @Get('opportunities')
+  listOpportunities(@Query() query: QueryAdminOpportunitiesDto) {
+    return this.submissionsService.listOpportunities(query);
+  }
+
+  @Get('opportunities/:id')
+  getOpportunity(@Param('id') id: string) {
+    return this.submissionsService.getOpportunity(id);
+  }
+
+  @Patch('opportunities/:id/decision')
+  decideOpportunity(
+    @CurrentUser() admin: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: SubmissionDecisionDto,
+  ) {
+    return this.submissionsService.decideOpportunity(admin, id, dto);
+  }
+
+  @Patch('opportunities/:id/remove')
+  removeOpportunity(@CurrentUser() admin: AuthUser, @Param('id') id: string, @Body() dto: RequiredReasonDto) {
+    return this.submissionsService.removeOpportunity(admin, id, dto.reason);
+  }
+
+  @Patch('opportunities/:id/restore')
+  restoreOpportunity(@CurrentUser() admin: AuthUser, @Param('id') id: string, @Body() dto: OptionalReasonDto) {
+    return this.submissionsService.restoreOpportunity(admin, id, dto.reason);
+  }
+
+  // Events. status=PENDING is the approval queue.
+
+  @Get('events')
+  listEvents(@Query() query: QueryAdminEventsDto) {
+    return this.submissionsService.listEvents(query);
+  }
+
+  @Get('events/:id')
+  getEvent(@Param('id') id: string) {
+    return this.submissionsService.getEvent(id);
+  }
+
+  @Patch('events/:id/decision')
+  decideEvent(@CurrentUser() admin: AuthUser, @Param('id') id: string, @Body() dto: SubmissionDecisionDto) {
+    return this.submissionsService.decideEvent(admin, id, dto);
+  }
+
+  @Patch('events/:id/remove')
+  removeEvent(@CurrentUser() admin: AuthUser, @Param('id') id: string, @Body() dto: RequiredReasonDto) {
+    return this.submissionsService.removeEvent(admin, id, dto.reason);
+  }
+
+  @Patch('events/:id/restore')
+  restoreEvent(@CurrentUser() admin: AuthUser, @Param('id') id: string, @Body() dto: OptionalReasonDto) {
+    return this.submissionsService.restoreEvent(admin, id, dto.reason);
+  }
+
+  // PPA reviews
+
+  @Get('ppa-reviews')
+  listPpaReviews(@Query() query: QueryAdminPpaReviewsDto) {
+    return this.submissionsService.listPpaReviews(query);
+  }
+
+  @Get('ppa-reviews/:id')
+  getPpaReview(@Param('id') id: string) {
+    return this.submissionsService.getPpaReview(id);
+  }
+
+  @Delete('ppa-reviews/:id')
+  deletePpaReview(@CurrentUser() admin: AuthUser, @Param('id') id: string, @Body() dto: OptionalReasonDto) {
+    return this.submissionsService.removePpaReview(admin, id, dto.reason);
   }
 }

@@ -16,6 +16,9 @@ Backend API for NaijaCorper. All paths start with **/api/v1**.
 ## Verified email
 Posting media, selling, creating groups and sending a verification document need a verified email. Those calls answer **403** with \`code: "EMAIL_NOT_VERIFIED"\`. Show a "verify your email" prompt. Codes are sent by **POST /auth/register** and **POST /auth/resend-verification**.
 
+## Who may post what
+Opportunities, events and PPA reviews are not open to everyone. When someone is not allowed, the call answers **403** with a \`code\` you can show a message for: \`EMAIL_NOT_VERIFIED\` (verify the email first), \`VERIFICATION_REQUIRED\` (a corps member must get the verified badge first) or \`ROLE_NOT_ALLOWED\` (this account type cannot do it). Opportunities and events that need approval are saved as \`PENDING\` and are visible only to their owner and admins until an admin approves them.
+
 ## Lists and pages
 List calls take \`pageSize\` (1 to 50, default 20) and \`cursor\`. The answer has a \`nextCursor\`. Send it back unchanged to get the next page. \`null\` means there are no more pages. Never build or edit a cursor yourself.
 
@@ -47,7 +50,10 @@ const TAGS: Record<string, string> = {
   groups: 'Groups people can join and post in.',
   hashtags: 'Trending tags, tag search and posts by tag.',
   uploads: 'File uploads. Upload first, then use the returned url.',
-  reports: 'Report a post, user, comment, listing or group.',
+  opportunities: 'Jobs, internships, scholarships, grants and more. Posted by recruiters, businesses, admins and verified corps members (the last need approval).',
+  events: 'Corps meetups, trainings and networking. RSVP, cancel and organizer tools. New events need admin approval.',
+  ppas: 'Anonymous-by-default reviews of places of primary assignment, written by verified corps members.',
+  reports: 'Report a post, user, comment, listing, group, opportunity, event or PPA review.',
   admin: 'Admin tools. Every call needs an admin account.',
 };
 
@@ -84,10 +90,11 @@ const SUMMARIES: Record<string, string> = {
   'POST /api/v1/users/{userId}/follow': 'Follow a user',
   'DELETE /api/v1/users/{userId}/follow': 'Unfollow a user',
 
-  'POST /api/v1/reports': 'Report a post, user, comment, listing or group',
+  'POST /api/v1/reports': 'Report a post, user, comment, listing, group, opportunity, event or PPA review',
 
   'POST /api/v1/uploads/post-media': 'Upload a photo or short video for a post',
   'POST /api/v1/uploads/listing-image': 'Upload a photo for a marketplace listing',
+  'POST /api/v1/uploads/event-cover': 'Upload a cover photo for an event',
 
   'PATCH /api/v1/onboarding/journey-stage': 'Choose your NYSC journey stage',
   'PATCH /api/v1/onboarding/prospective-details': 'Save details for someone waiting for call-up',
@@ -152,6 +159,35 @@ const SUMMARIES: Record<string, string> = {
   'GET /api/v1/groups/{group}/members': 'Members of a group',
   'GET /api/v1/groups/{group}/posts': 'Posts inside a group',
 
+  'POST /api/v1/opportunities': 'Post an opportunity (live at once, or waiting for approval)',
+  'GET /api/v1/opportunities': 'Browse and search open opportunities',
+  'GET /api/v1/opportunities/mine': 'Your own opportunities in every status',
+  'GET /api/v1/opportunities/{id}': 'Get one opportunity',
+  'PATCH /api/v1/opportunities/{id}': 'Edit an opportunity (yours, or any as an admin)',
+  'PATCH /api/v1/opportunities/{id}/status': 'Close your opportunity, or open it again',
+  'DELETE /api/v1/opportunities/{id}': 'Delete your opportunity',
+
+  'POST /api/v1/events': 'Create an event (waits for approval unless you are an admin)',
+  'GET /api/v1/events': 'Browse and search events',
+  'GET /api/v1/events/mine': 'Events you created, in every status',
+  'GET /api/v1/events/going': 'Events you said you are going to',
+  'GET /api/v1/events/{id}': 'Get one event',
+  'PATCH /api/v1/events/{id}': 'Edit an event (yours, or any as an admin)',
+  'POST /api/v1/events/{id}/cancel': 'Cancel your event and tell everyone who is going',
+  'DELETE /api/v1/events/{id}': 'Delete your event (cancel a live one first)',
+  'POST /api/v1/events/{id}/rsvp': 'Say you are going',
+  'DELETE /api/v1/events/{id}/rsvp': 'Say you are not going',
+  'GET /api/v1/events/{id}/attendees': 'Who is going (organizer and admins only)',
+
+  'GET /api/v1/ppas': 'Browse and search PPAs that have reviews',
+  'GET /api/v1/ppas/suggest': 'Find a PPA by name while writing a review (also finds PPAs without reviews)',
+  'GET /api/v1/ppas/reviews/mine': 'Reviews you wrote',
+  'POST /api/v1/ppas/reviews': 'Review a PPA (creates the PPA if it is new)',
+  'PATCH /api/v1/ppas/reviews/{reviewId}': 'Edit your review',
+  'DELETE /api/v1/ppas/reviews/{reviewId}': 'Delete your review',
+  'GET /api/v1/ppas/{id}': 'One PPA with averages and your own review',
+  'GET /api/v1/ppas/{id}/reviews': 'Reviews of a PPA, newest first',
+
   'GET /api/v1/hashtags/trending': 'Trending hashtags this week',
   'GET /api/v1/hashtags/search': 'Search hashtags by name',
   'GET /api/v1/hashtags/{tag}/posts': 'Posts that use a hashtag',
@@ -181,7 +217,21 @@ const SUMMARIES: Record<string, string> = {
   'GET /api/v1/admin/groups': 'Search all groups',
   'DELETE /api/v1/admin/groups/{id}': 'Delete any group',
   'DELETE /api/v1/admin/explore/{id}': 'Delete any explore tip',
+  'GET /api/v1/admin/opportunities': 'Search opportunities (status=PENDING is the approval queue)',
+  'GET /api/v1/admin/opportunities/{id}': 'One opportunity (admin view)',
+  'PATCH /api/v1/admin/opportunities/{id}/decision': 'Approve or reject a pending opportunity',
+  'PATCH /api/v1/admin/opportunities/{id}/remove': 'Remove an opportunity (a reason is required, the poster sees it)',
+  'PATCH /api/v1/admin/opportunities/{id}/restore': 'Put a removed opportunity back',
+  'GET /api/v1/admin/events': 'Search events (status=PENDING is the approval queue)',
+  'GET /api/v1/admin/events/{id}': 'One event (admin view)',
+  'PATCH /api/v1/admin/events/{id}/decision': 'Approve or reject a pending event',
+  'PATCH /api/v1/admin/events/{id}/remove': 'Remove an event (a reason is required, the organizer sees it)',
+  'PATCH /api/v1/admin/events/{id}/restore': 'Put a removed event back',
+  'GET /api/v1/admin/ppa-reviews': 'Search PPA reviews (the author is shown, even when anonymous)',
+  'GET /api/v1/admin/ppa-reviews/{id}': 'One PPA review with its author',
+  'DELETE /api/v1/admin/ppa-reviews/{id}': 'Delete a PPA review (the author is told)',
 };
+
 
 // Extra explanation shown under the summary.
 const DETAILS: Record<string, string> = {
@@ -195,6 +245,48 @@ const DETAILS: Record<string, string> = {
   'GET /api/v1/users/{username}': 'Includes `isVerified` (the badge), follower counts and whether you follow them. Returns 404 for deactivated accounts and for people who blocked you.',
   'DELETE /api/v1/users/me': 'Body: `{ "password": "..." }`. Admin accounts cannot be deleted here. This cannot be undone.',
   'POST /api/v1/reports': 'Reasons are free text (up to 500 characters). You cannot report yourself, and a repeat report of the same item is refused.',
+  'POST /api/v1/uploads/event-cover': 'Needs a verified email. JPG, PNG, GIF or WebP up to 8 MB. Response: `{ "url": "..." }`. Send the url as `coverImageUrl` when creating or editing an event.',
+  'POST /api/v1/opportunities':
+    'Admins, recruiters and businesses (verified email) publish at once: status `OPEN`. Verified corps members (verified email and verified badge) are saved as `PENDING` until an admin approves. Others get 403 with a `code`. `deadline` can be a date (`2026-12-31`, counted to the end of that day in Nigerian time) or a full date and time. `applyUrl` must be an https link. Pay is whole naira. At most 10 posts waiting for review and 50 open or pending posts per person.',
+  'GET /api/v1/opportunities':
+    'Only `OPEN` opportunities from active posters whose deadline has not passed. Newest first. Filters: `type`, `state` (exact state), `mode`, `employmentType`, `q` (title, organization, description). Closed opportunities are not listed but can still be opened by link.',
+  'GET /api/v1/opportunities/mine': 'Every status. Filter with `status`. Rejected and removed posts include the reason.',
+  'GET /api/v1/opportunities/{id}': 'Open and closed opportunities are visible to everyone. Pending, rejected and removed ones are visible only to the owner and admins (404 for everyone else). `isMine` tells you if it is yours.',
+  'PATCH /api/v1/opportunities/{id}': 'Send only what changes. Send `null` to clear an optional field. An edit by a corps member sends an approved post back to `PENDING`, and editing a rejected post resubmits it. Posts by recruiters and businesses stay live, and admin edits never go back for review. A removed post cannot be edited by its owner.',
+  'PATCH /api/v1/opportunities/{id}/status': 'Body `{ "status": "CLOSED" }` for an open post or `{ "status": "OPEN" }` for a closed one. Does not go back for review.',
+  'DELETE /api/v1/opportunities/{id}': 'Only the owner. A post removed by a moderator cannot be deleted.',
+  'POST /api/v1/events':
+    'Admins publish at once (`PUBLISHED`). Verified corps members, recruiters and businesses (verified email) are saved as `PENDING` until an admin approves. Send `startsAt` and `endsAt` as full date and time with the offset (`2026-12-05T14:00:00+01:00`). The start must be in the future and an event can last at most 30 days. `state` is required unless `format` is `VIRTUAL`. `organizerName` defaults to your name. At most 10 events waiting for review and 30 upcoming events per person.',
+  'GET /api/v1/events':
+    'Published events only, from active organizers. `when`: `upcoming` (default, not finished yet, soonest first), `past` or `all` (most recent first). Filters: `category`, `state`, `format`, `q`. Every event has `rsvpCount` and `viewerRsvp` (are you going). Cancelled events are not listed but can be opened by link.',
+  'GET /api/v1/events/mine': 'Every status. Filter with `status`.',
+  'GET /api/v1/events/going': 'Events you RSVPed to, most recent RSVP first. Includes cancelled ones so you can see they were called off.',
+  'GET /api/v1/events/{id}': 'Published and cancelled events are visible to everyone. Pending, rejected and removed ones only to the organizer and admins (404 otherwise).',
+  'PATCH /api/v1/events/{id}': 'Send only what changes. Send `null` to clear an optional field. An edit by a non-admin sends the event back to `PENDING`. Cancelled and removed events cannot be edited by their organizer.',
+  'POST /api/v1/events/{id}/cancel': 'Organizer only, for a live event that has not ended. Optional body `{ "reason": "..." }`. Everyone who said they are going gets a notification.',
+  'DELETE /api/v1/events/{id}': 'Organizer only. A live event must be cancelled first. A removed event cannot be deleted. The RSVPs go with it.',
+  'POST /api/v1/events/{id}/rsvp': 'Response: `{ "going": true, "rsvpCount": 12 }`. 409 if you are already going, the event was cancelled or it has ended.',
+  'DELETE /api/v1/events/{id}/rsvp': 'Response: `{ "going": false, "rsvpCount": 11 }`. Safe to call when you were not going.',
+  'GET /api/v1/events/{id}/attendees': 'Only the organizer and admins (403 for others). Response: `{ attendees: [{ user, rsvpAt }], total, nextCursor }`. Everyone else only sees the count and their own answer.',
+  'GET /api/v1/ppas':
+    'PPAs with at least one review, most recently reviewed first. Filters: `q` (name), `state`, `sector`. Each PPA has `rating` (1 to 5), `environment`, `learning`, `workload` and `staffRelationship` (each `{ average, label }`), `reviewCount` and one `highlight` quote.',
+  'GET /api/v1/ppas/suggest': 'For the "which PPA?" field. `q` is required (at least 2 characters), `state` is optional. Returns at most 10 PPAs (not paged), including ones with no reviews.',
+  'POST /api/v1/ppas/reviews':
+    'Only verified serving and ex corps members with a verified email (otherwise 403 with a `code`). Send `ppaId` for an existing PPA, or `name` and `state` (optionally `lga`, `sector`) to find or create it. Spelling differences such as "Paystack Ltd" and "PAYSTACK" are matched. One review per person per PPA (409). `isAnonymous` defaults to true.',
+  'GET /api/v1/ppas/reviews/mine': 'Your reviews with the PPA they belong to.',
+  'PATCH /api/v1/ppas/reviews/{reviewId}': 'Only the author (404 for anyone else). Send only what changes. The PPA cannot be changed. You can switch `isAnonymous` either way.',
+  'DELETE /api/v1/ppas/reviews/{reviewId}': 'Only the author (404 for anyone else).',
+  'GET /api/v1/ppas/{id}': 'Also works for a PPA with no reviews. Includes `ratingDistribution` and `myReview` (your own review or null).',
+  'GET /api/v1/ppas/{id}/reviews': 'Newest first. `author` is null unless the author chose to be named. `isMine` marks your own review. The author id is never returned.',
+  'GET /api/v1/admin/opportunities': '`status=PENDING` lists the approval queue oldest first. Other filters: `type`, `postedById`, `q`. Includes the poster\'s email.',
+  'PATCH /api/v1/admin/opportunities/{id}/decision': 'Body `{ "decision": "APPROVE" }` or `{ "decision": "REJECT", "reason": "..." }`. Only pending posts can be decided, once. The poster gets a notification and the reason is shown to them.',
+  'PATCH /api/v1/admin/opportunities/{id}/remove': 'Body `{ "reason": "..." }` (required). The poster is told. The record is kept.',
+  'PATCH /api/v1/admin/opportunities/{id}/restore': 'Puts a removed opportunity back live (this counts as approving it).',
+  'GET /api/v1/admin/events': '`status=PENDING` lists the approval queue oldest first. Other filters: `category`, `createdById`, `q`. Includes the organizer\'s email.',
+  'PATCH /api/v1/admin/events/{id}/decision': 'Body `{ "decision": "APPROVE" }` or `{ "decision": "REJECT", "reason": "..." }`. Only pending events can be decided, once. An event that has already ended cannot be approved.',
+  'PATCH /api/v1/admin/events/{id}/remove': 'Body `{ "reason": "..." }` (required). The organizer is told, and so is everyone going to a live event.',
+  'PATCH /api/v1/admin/events/{id}/restore': 'Puts a removed event back live (this counts as approving it).',
+  'DELETE /api/v1/admin/ppa-reviews/{id}': 'Optional body `{ "reason": "..." }`. The PPA totals are updated and the author is told. Written to the audit log.',
   'POST /api/v1/uploads/post-media': 'Needs a verified email. Photos (JPG, PNG, GIF, WebP) up to 15 MB, or short videos (MP4, MOV). Response: `{ "url": "..." }`.',
   'POST /api/v1/uploads/listing-image': 'Needs a verified email. JPG, PNG, GIF or WebP up to 8 MB. Response: `{ "url": "..." }`.',
   'PATCH /api/v1/users/me/avatar': 'JPG, PNG or WebP up to 5 MB. It is cropped to a square.',
@@ -215,7 +307,7 @@ const DETAILS: Record<string, string> = {
   'PATCH /api/v1/admin/users/{id}/deactivate': 'You cannot deactivate yourself or another admin.',
   'PATCH /api/v1/admin/verifications/{id}/decision': 'A reason is required when rejecting and the person can read it. They get a notification. The document file is deleted after the decision.',
   'PATCH /api/v1/admin/reports/{id}/decision':
-    '`status`: REVIEWED or DISMISSED. `action` (optional): NONE, REMOVE_CONTENT (removes the reported post, comment, listing or group) or DEACTIVATE_USER (the owner of the content, or the reported user). Other open reports about the same item are closed too.',
+    '`status`: REVIEWED or DISMISSED. `action` (optional): NONE, REMOVE_CONTENT (removes the reported post, comment, listing, group, opportunity, event or PPA review) or DEACTIVATE_USER (the owner of the content, or the reported user). Other open reports about the same item are closed too.',
   'GET /api/v1/admin/reports/{id}': 'Includes a copy of the content taken when the report was made, so it can still be read if it was edited or deleted since.',
 };
 
@@ -227,6 +319,7 @@ const UPLOADS: Record<
 > = {
   'POST /api/v1/uploads/post-media': { fileDescription: 'Photo (JPG, PNG, GIF, WebP) or video (MP4, MOV), up to 15 MB' },
   'POST /api/v1/uploads/listing-image': { fileDescription: 'JPG, PNG, GIF or WebP, up to 8 MB' },
+  'POST /api/v1/uploads/event-cover': { fileDescription: 'JPG, PNG, GIF or WebP, up to 8 MB' },
   'PATCH /api/v1/users/me/avatar': { fileDescription: 'JPG, PNG or WebP, up to 5 MB' },
   'PATCH /api/v1/groups/{group}/avatar': { fileDescription: 'JPG, PNG or WebP, up to 5 MB' },
   'POST /api/v1/onboarding/verification-document': {
@@ -257,10 +350,21 @@ const PUBLIC_ROUTES = new Set([
 const NEEDS_VERIFIED_EMAIL = new Set([
   'POST /api/v1/uploads/post-media',
   'POST /api/v1/uploads/listing-image',
+  'POST /api/v1/uploads/event-cover',
   'POST /api/v1/onboarding/verification-document',
   'POST /api/v1/marketplace/listings',
   'PATCH /api/v1/marketplace/listings/{id}',
   'POST /api/v1/groups',
+]);
+
+// Routes that answer 403 with a `code` when the account is not allowed.
+const CODED_403 = new Set([
+  'POST /api/v1/opportunities',
+  'PATCH /api/v1/opportunities/{id}',
+  'POST /api/v1/events',
+  'PATCH /api/v1/events/{id}',
+  'POST /api/v1/ppas/reviews',
+  'PATCH /api/v1/ppas/reviews/{reviewId}',
 ]);
 
 const TOKEN_RESPONSE = {
@@ -350,7 +454,7 @@ export function improveApiDocument(document: OpenAPIObject): OpenAPIObject {
         };
       }
 
-      if (okCode && ['POST /api/v1/uploads/post-media', 'POST /api/v1/uploads/listing-image'].includes(key)) {
+      if (okCode && ['POST /api/v1/uploads/post-media', 'POST /api/v1/uploads/listing-image', 'POST /api/v1/uploads/event-cover'].includes(key)) {
         responses[okCode] = { description: 'The uploaded file', content: { 'application/json': { schema: URL_RESPONSE } } };
       }
 
@@ -363,6 +467,11 @@ export function improveApiDocument(document: OpenAPIObject): OpenAPIObject {
       if (isAdmin) responses['403'] ??= errorResponse('Not an admin.');
       if (NEEDS_VERIFIED_EMAIL.has(key)) {
         responses['403'] ??= errorResponse('Email not verified (`code: "EMAIL_NOT_VERIFIED"`) or not allowed.');
+      }
+      if (CODED_403.has(key)) {
+        responses['403'] ??= errorResponse(
+          'Not allowed. `code` is EMAIL_NOT_VERIFIED, VERIFICATION_REQUIRED or ROLE_NOT_ALLOWED. Other 403 answers explain themselves in `message`.',
+        );
       }
       if (path.includes('{')) responses['404'] ??= errorResponse('Not found, or hidden from you.');
       responses['429'] ??= errorResponse('Too many requests. Wait a moment and try again.');

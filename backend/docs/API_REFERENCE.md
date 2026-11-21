@@ -12,6 +12,9 @@ Backend API for NaijaCorper. All paths start with **/api/v1**.
 ## Verified email
 Posting media, selling, creating groups and sending a verification document need a verified email. Those calls answer **403** with `code: "EMAIL_NOT_VERIFIED"`. Show a "verify your email" prompt. Codes are sent by **POST /auth/register** and **POST /auth/resend-verification**.
 
+## Who may post what
+Opportunities, events and PPA reviews are not open to everyone. When someone is not allowed, the call answers **403** with a `code` you can show a message for: `EMAIL_NOT_VERIFIED` (verify the email first), `VERIFICATION_REQUIRED` (a corps member must get the verified badge first) or `ROLE_NOT_ALLOWED` (this account type cannot do it). Opportunities and events that need approval are saved as `PENDING` and are visible only to their owner and admins until an admin approves them.
+
 ## Lists and pages
 List calls take `pageSize` (1 to 50, default 20) and `cursor`. The answer has a `nextCursor`. Send it back unchanged to get the next page. `null` means there are no more pages. Never build or edit a cursor yourself.
 
@@ -1412,14 +1415,590 @@ Body (multipart form data):
 Possible errors: 400, 401, 403, 429
 
 
+### POST /uploads/event-cover
+
+**Upload a cover photo for an event**  
+Needs sign in
+
+
+Needs a verified email. JPG, PNG, GIF or WebP up to 8 MB. Response: `{ "url": "..." }`. Send the url as `coverImageUrl` when creating or editing an event.
+
+
+Body (multipart form data):
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `file` | file | yes | JPG, PNG, GIF or WebP, up to 8 MB |
+
+Possible errors: 400, 401, 403, 429
+
+
+## opportunities
+
+Jobs, internships, scholarships, grants and more. Posted by recruiters, businesses, admins and verified corps members (the last need approval).
+
+
+### POST /opportunities
+
+**Post an opportunity (live at once, or waiting for approval)**  
+Needs sign in
+
+
+Admins, recruiters and businesses (verified email) publish at once: status `OPEN`. Verified corps members (verified email and verified badge) are saved as `PENDING` until an admin approves. Others get 403 with a `code`. `deadline` can be a date (`2026-12-31`, counted to the end of that day in Nigerian time) or a full date and time. `applyUrl` must be an https link. Pay is whole naira. At most 10 posts waiting for review and 50 open or pending posts per person.
+
+
+Body (JSON):
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `type` | one of: JOB, INTERNSHIP, FREELANCE, SCHOLARSHIP, GRANT, TRAINING, COMPETITION, BUSINESS, NETWORKING, OTHER | yes |  |
+| `mode` | one of: ONSITE, REMOTE, HYBRID | no |  |
+| `employmentType` | one of: FULL_TIME, PART_TIME, CONTRACT, VOLUNTEER | no |  |
+| `title` | string (3 to 150 chars) | yes |  |
+| `organization` | string (2 to 120 chars) | yes |  |
+| `description` | string (20 to 5000 chars) | yes |  |
+| `state` | string | no |  |
+| `city` | string (up to 80 chars) | no |  |
+| `country` | string (up to 80 chars) | no |  |
+| `compensationMin` | number (0 to 1000000000) | no |  |
+| `compensationMax` | number (0 to 1000000000) | no |  |
+| `compensationNote` | string (up to 200 chars) | no |  |
+| `duration` | string (up to 80 chars) | no |  |
+| `deadline` | string | no |  |
+| `applyUrl` | string | no |  |
+| `applyEmail` | string (up to 254 chars) | no |  |
+
+Possible errors: 400, 401, 403, 429
+
+
+### GET /opportunities
+
+**Browse and search open opportunities**  
+Needs sign in
+
+
+Only `OPEN` opportunities from active posters whose deadline has not passed. Newest first. Filters: `type`, `state` (exact state), `mode`, `employmentType`, `q` (title, organization, description). Closed opportunities are not listed but can still be opened by link.
+
+
+| Query | Type | Required | Notes |
+|---|---|---|---|
+| `type` | one of: JOB, INTERNSHIP, FREELANCE, SCHOLARSHIP, GRANT, TRAINING, COMPETITION, BUSINESS, NETWORKING, OTHER | no |  |
+| `mode` | one of: ONSITE, REMOTE, HYBRID | no |  |
+| `employmentType` | one of: FULL_TIME, PART_TIME, CONTRACT, VOLUNTEER | no |  |
+| `state` | string | no |  |
+| `q` | string (up to 60 chars) | no |  |
+| `cursor` | string (up to 200 chars) | no |  |
+| `pageSize` | number (1 to 50) | no |  |
+
+Possible errors: 400, 401, 429
+
+
+### GET /opportunities/mine
+
+**Your own opportunities in every status**  
+Needs sign in
+
+
+Every status. Filter with `status`. Rejected and removed posts include the reason.
+
+
+| Query | Type | Required | Notes |
+|---|---|---|---|
+| `status` | one of: PENDING, OPEN, CLOSED, REJECTED, REMOVED | no |  |
+| `cursor` | string (up to 200 chars) | no |  |
+| `pageSize` | number (1 to 50) | no |  |
+
+Possible errors: 400, 401, 429
+
+
+### GET /opportunities/{id}
+
+**Get one opportunity**  
+Needs sign in
+
+
+Open and closed opportunities are visible to everyone. Pending, rejected and removed ones are visible only to the owner and admins (404 for everyone else). `isMine` tells you if it is yours.
+
+
+Path: `id`
+
+
+Possible errors: 400, 401, 404, 429
+
+
+### PATCH /opportunities/{id}
+
+**Edit an opportunity (yours, or any as an admin)**  
+Needs sign in
+
+
+Send only what changes. Send `null` to clear an optional field. An edit by a corps member sends an approved post back to `PENDING`, and editing a rejected post resubmits it. Posts by recruiters and businesses stay live, and admin edits never go back for review. A removed post cannot be edited by its owner.
+
+
+Path: `id`
+
+
+Body (JSON):
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `type` | one of: JOB, INTERNSHIP, FREELANCE, SCHOLARSHIP, GRANT, TRAINING, COMPETITION, BUSINESS, NETWORKING, OTHER | no |  |
+| `mode` | one of: ONSITE, REMOTE, HYBRID | no |  |
+| `employmentType` | one of: FULL_TIME, PART_TIME, CONTRACT, VOLUNTEER | no |  |
+| `title` | string (3 to 150 chars) | no |  |
+| `organization` | string (2 to 120 chars) | no |  |
+| `description` | string (20 to 5000 chars) | no |  |
+| `state` | string | no |  |
+| `city` | string (up to 80 chars) | no |  |
+| `country` | string (up to 80 chars) | no |  |
+| `compensationMin` | number (0 to 1000000000) | no |  |
+| `compensationMax` | number (0 to 1000000000) | no |  |
+| `compensationNote` | string (up to 200 chars) | no |  |
+| `duration` | string (up to 80 chars) | no |  |
+| `deadline` | string | no |  |
+| `applyUrl` | string | no |  |
+| `applyEmail` | string (up to 254 chars) | no |  |
+
+Possible errors: 400, 401, 403, 404, 429
+
+
+### DELETE /opportunities/{id}
+
+**Delete your opportunity**  
+Needs sign in
+
+
+Only the owner. A post removed by a moderator cannot be deleted.
+
+
+Path: `id`
+
+
+Possible errors: 400, 401, 404, 429
+
+
+### PATCH /opportunities/{id}/status
+
+**Close your opportunity, or open it again**  
+Needs sign in
+
+
+Body `{ "status": "CLOSED" }` for an open post or `{ "status": "OPEN" }` for a closed one. Does not go back for review.
+
+
+Path: `id`
+
+
+Body (JSON):
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `status` | one of: OPEN, CLOSED | no |  |
+
+Possible errors: 400, 401, 404, 429
+
+
+## events
+
+Corps meetups, trainings and networking. RSVP, cancel and organizer tools. New events need admin approval.
+
+
+### POST /events
+
+**Create an event (waits for approval unless you are an admin)**  
+Needs sign in
+
+
+Admins publish at once (`PUBLISHED`). Verified corps members, recruiters and businesses (verified email) are saved as `PENDING` until an admin approves. Send `startsAt` and `endsAt` as full date and time with the offset (`2026-12-05T14:00:00+01:00`). The start must be in the future and an event can last at most 30 days. `state` is required unless `format` is `VIRTUAL`. `organizerName` defaults to your name. At most 10 events waiting for review and 30 upcoming events per person.
+
+
+Body (JSON):
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `category` | one of: MEETUP, NYSC_EVENT, NETWORKING, TECH, BUSINESS, SOCIAL, TRAINING, CAREER | yes |  |
+| `format` | one of: PHYSICAL, VIRTUAL, HYBRID | no |  |
+| `title` | string (3 to 150 chars) | yes |  |
+| `description` | string (10 to 3000 chars) | yes |  |
+| `coverImageUrl` | string | no |  |
+| `organizerName` | string (up to 120 chars) | no |  |
+| `startsAt` | string | yes |  |
+| `endsAt` | string | yes |  |
+| `state` | string | no |  |
+| `lga` | string (up to 80 chars) | no |  |
+| `city` | string (up to 80 chars) | no |  |
+| `venue` | string (up to 200 chars) | no |  |
+| `registrationUrl` | string | no |  |
+| `meetingUrl` | string | no |  |
+
+Possible errors: 400, 401, 403, 429
+
+
+### GET /events
+
+**Browse and search events**  
+Needs sign in
+
+
+Published events only, from active organizers. `when`: `upcoming` (default, not finished yet, soonest first), `past` or `all` (most recent first). Filters: `category`, `state`, `format`, `q`. Every event has `rsvpCount` and `viewerRsvp` (are you going). Cancelled events are not listed but can be opened by link.
+
+
+| Query | Type | Required | Notes |
+|---|---|---|---|
+| `category` | one of: MEETUP, NYSC_EVENT, NETWORKING, TECH, BUSINESS, SOCIAL, TRAINING, CAREER | no |  |
+| `format` | one of: PHYSICAL, VIRTUAL, HYBRID | no |  |
+| `when` | one of: upcoming, past, all | no |  |
+| `state` | string | no |  |
+| `q` | string (up to 60 chars) | no |  |
+| `cursor` | string (up to 200 chars) | no |  |
+| `pageSize` | number (1 to 50) | no |  |
+
+Possible errors: 400, 401, 429
+
+
+### GET /events/mine
+
+**Events you created, in every status**  
+Needs sign in
+
+
+Every status. Filter with `status`.
+
+
+| Query | Type | Required | Notes |
+|---|---|---|---|
+| `status` | one of: PENDING, PUBLISHED, REJECTED, CANCELLED, REMOVED | no |  |
+| `cursor` | string (up to 200 chars) | no |  |
+| `pageSize` | number (1 to 50) | no |  |
+
+Possible errors: 400, 401, 429
+
+
+### GET /events/going
+
+**Events you said you are going to**  
+Needs sign in
+
+
+Events you RSVPed to, most recent RSVP first. Includes cancelled ones so you can see they were called off.
+
+
+| Query | Type | Required | Notes |
+|---|---|---|---|
+| `cursor` | string (up to 200 chars) | no |  |
+| `pageSize` | number (1 to 50) | no |  |
+
+Possible errors: 400, 401, 429
+
+
+### GET /events/{id}
+
+**Get one event**  
+Needs sign in
+
+
+Published and cancelled events are visible to everyone. Pending, rejected and removed ones only to the organizer and admins (404 otherwise).
+
+
+Path: `id`
+
+
+Possible errors: 400, 401, 404, 429
+
+
+### PATCH /events/{id}
+
+**Edit an event (yours, or any as an admin)**  
+Needs sign in
+
+
+Send only what changes. Send `null` to clear an optional field. An edit by a non-admin sends the event back to `PENDING`. Cancelled and removed events cannot be edited by their organizer.
+
+
+Path: `id`
+
+
+Body (JSON):
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `category` | one of: MEETUP, NYSC_EVENT, NETWORKING, TECH, BUSINESS, SOCIAL, TRAINING, CAREER | no |  |
+| `format` | one of: PHYSICAL, VIRTUAL, HYBRID | no |  |
+| `title` | string (3 to 150 chars) | no |  |
+| `description` | string (10 to 3000 chars) | no |  |
+| `coverImageUrl` | string | no |  |
+| `organizerName` | string (up to 120 chars) | no |  |
+| `startsAt` | string | no |  |
+| `endsAt` | string | no |  |
+| `state` | string | no |  |
+| `lga` | string (up to 80 chars) | no |  |
+| `city` | string (up to 80 chars) | no |  |
+| `venue` | string (up to 200 chars) | no |  |
+| `registrationUrl` | string | no |  |
+| `meetingUrl` | string | no |  |
+
+Possible errors: 400, 401, 403, 404, 429
+
+
+### DELETE /events/{id}
+
+**Delete your event (cancel a live one first)**  
+Needs sign in
+
+
+Organizer only. A live event must be cancelled first. A removed event cannot be deleted. The RSVPs go with it.
+
+
+Path: `id`
+
+
+Possible errors: 400, 401, 404, 429
+
+
+### POST /events/{id}/cancel
+
+**Cancel your event and tell everyone who is going**  
+Needs sign in
+
+
+Organizer only, for a live event that has not ended. Optional body `{ "reason": "..." }`. Everyone who said they are going gets a notification.
+
+
+Path: `id`
+
+
+Body (JSON):
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `reason` | string (up to 300 chars) | no |  |
+
+Possible errors: 400, 401, 404, 429
+
+
+### POST /events/{id}/rsvp
+
+**Say you are going**  
+Needs sign in
+
+
+Response: `{ "going": true, "rsvpCount": 12 }`. 409 if you are already going, the event was cancelled or it has ended.
+
+
+Path: `id`
+
+
+Possible errors: 400, 401, 404, 429
+
+
+### DELETE /events/{id}/rsvp
+
+**Say you are not going**  
+Needs sign in
+
+
+Response: `{ "going": false, "rsvpCount": 11 }`. Safe to call when you were not going.
+
+
+Path: `id`
+
+
+Possible errors: 400, 401, 404, 429
+
+
+### GET /events/{id}/attendees
+
+**Who is going (organizer and admins only)**  
+Needs sign in
+
+
+Only the organizer and admins (403 for others). Response: `{ attendees: [{ user, rsvpAt }], total, nextCursor }`. Everyone else only sees the count and their own answer.
+
+
+Path: `id`
+
+
+| Query | Type | Required | Notes |
+|---|---|---|---|
+| `cursor` | string (up to 200 chars) | no |  |
+| `pageSize` | number (1 to 50) | no |  |
+
+Possible errors: 400, 401, 404, 429
+
+
+## ppas
+
+Anonymous-by-default reviews of places of primary assignment, written by verified corps members.
+
+
+### GET /ppas
+
+**Browse and search PPAs that have reviews**  
+Needs sign in
+
+
+PPAs with at least one review, most recently reviewed first. Filters: `q` (name), `state`, `sector`. Each PPA has `rating` (1 to 5), `environment`, `learning`, `workload` and `staffRelationship` (each `{ average, label }`), `reviewCount` and one `highlight` quote.
+
+
+| Query | Type | Required | Notes |
+|---|---|---|---|
+| `sector` | one of: BANKING_FINANCE, TECHNOLOGY, EDUCATION, HEALTHCARE, GOVERNMENT, MEDIA, MANUFACTURING, NGO, OTHER | no |  |
+| `q` | string (up to 60 chars) | no |  |
+| `state` | string | no |  |
+| `cursor` | string (up to 200 chars) | no |  |
+| `pageSize` | number (1 to 50) | no |  |
+
+Possible errors: 400, 401, 429
+
+
+### GET /ppas/suggest
+
+**Find a PPA by name while writing a review (also finds PPAs without reviews)**  
+Needs sign in
+
+
+For the "which PPA?" field. `q` is required (at least 2 characters), `state` is optional. Returns at most 10 PPAs (not paged), including ones with no reviews.
+
+
+| Query | Type | Required | Notes |
+|---|---|---|---|
+| `q` | string (2 to 60 chars) | yes |  |
+| `state` | string | no |  |
+
+Possible errors: 400, 401, 429
+
+
+### GET /ppas/reviews/mine
+
+**Reviews you wrote**  
+Needs sign in
+
+
+Your reviews with the PPA they belong to.
+
+
+| Query | Type | Required | Notes |
+|---|---|---|---|
+| `cursor` | string (up to 200 chars) | no |  |
+| `pageSize` | number (1 to 50) | no |  |
+
+Possible errors: 400, 401, 429
+
+
+### POST /ppas/reviews
+
+**Review a PPA (creates the PPA if it is new)**  
+Needs sign in
+
+
+Only verified serving and ex corps members with a verified email (otherwise 403 with a `code`). Send `ppaId` for an existing PPA, or `name` and `state` (optionally `lga`, `sector`) to find or create it. Spelling differences such as "Paystack Ltd" and "PAYSTACK" are matched. One review per person per PPA (409). `isAnonymous` defaults to true.
+
+
+Body (JSON):
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `sector` | one of: BANKING_FINANCE, TECHNOLOGY, EDUCATION, HEALTHCARE, GOVERNMENT, MEDIA, MANUFACTURING, NGO, OTHER | no |  |
+| `environment` | one of: POOR, FAIR, GOOD, EXCELLENT | yes |  |
+| `learning` | one of: LOW, MODERATE, HIGH | yes |  |
+| `workload` | one of: LOW, MODERATE, HIGH | yes |  |
+| `staffRelationship` | one of: POOR, FAIR, GOOD, EXCELLENT | yes |  |
+| `ppaId` | string | no |  |
+| `name` | string (2 to 120 chars) | no |  |
+| `state` | string | no |  |
+| `lga` | string (up to 80 chars) | no |  |
+| `overallRating` | number (1 to 5) | yes |  |
+| `content` | string (20 to 2000 chars) | yes |  |
+| `isAnonymous` | boolean | no |  |
+
+Possible errors: 400, 401, 403, 429
+
+
+### PATCH /ppas/reviews/{reviewId}
+
+**Edit your review**  
+Needs sign in
+
+
+Only the author (404 for anyone else). Send only what changes. The PPA cannot be changed. You can switch `isAnonymous` either way.
+
+
+Path: `reviewId`
+
+
+Body (JSON):
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `environment` | one of: POOR, FAIR, GOOD, EXCELLENT | no |  |
+| `learning` | one of: LOW, MODERATE, HIGH | no |  |
+| `workload` | one of: LOW, MODERATE, HIGH | no |  |
+| `staffRelationship` | one of: POOR, FAIR, GOOD, EXCELLENT | no |  |
+| `overallRating` | number (1 to 5) | no |  |
+| `content` | string (20 to 2000 chars) | no |  |
+| `isAnonymous` | boolean | no |  |
+
+Possible errors: 400, 401, 403, 404, 429
+
+
+### DELETE /ppas/reviews/{reviewId}
+
+**Delete your review**  
+Needs sign in
+
+
+Only the author (404 for anyone else).
+
+
+Path: `reviewId`
+
+
+Possible errors: 400, 401, 404, 429
+
+
+### GET /ppas/{id}
+
+**One PPA with averages and your own review**  
+Needs sign in
+
+
+Also works for a PPA with no reviews. Includes `ratingDistribution` and `myReview` (your own review or null).
+
+
+Path: `id`
+
+
+Possible errors: 400, 401, 404, 429
+
+
+### GET /ppas/{id}/reviews
+
+**Reviews of a PPA, newest first**  
+Needs sign in
+
+
+Newest first. `author` is null unless the author chose to be named. `isMine` marks your own review. The author id is never returned.
+
+
+Path: `id`
+
+
+| Query | Type | Required | Notes |
+|---|---|---|---|
+| `cursor` | string (up to 200 chars) | no |  |
+| `pageSize` | number (1 to 50) | no |  |
+
+Possible errors: 400, 401, 404, 429
+
+
 ## reports
 
-Report a post, user, comment, listing or group.
+Report a post, user, comment, listing, group, opportunity, event or PPA review.
 
 
 ### POST /reports
 
-**Report a post, user, comment, listing or group**  
+**Report a post, user, comment, listing, group, opportunity, event or PPA review**  
 Needs sign in
 
 
@@ -1430,7 +2009,7 @@ Body (JSON):
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `targetType` | one of: POST, USER, COMMENT, LISTING, GROUP | yes |  |
+| `targetType` | one of: POST, USER, COMMENT, LISTING, GROUP, OPPORTUNITY, EVENT, PPA_REVIEW | yes |  |
 | `targetId` | string (up to 64 chars) | yes |  |
 | `reason` | string (3 to 500 chars) | yes |  |
 
@@ -1637,7 +2216,7 @@ Admin only
 | Query | Type | Required | Notes |
 |---|---|---|---|
 | `status` | one of: PENDING, REVIEWED, DISMISSED, ALL | no |  |
-| `targetType` | one of: POST, USER, COMMENT, LISTING, GROUP | no |  |
+| `targetType` | one of: POST, USER, COMMENT, LISTING, GROUP, OPPORTUNITY, EVENT, PPA_REVIEW | no |  |
 | `cursor` | string (up to 200 chars) | no |  |
 | `pageSize` | number (1 to 50) | no |  |
 
@@ -1665,7 +2244,7 @@ Possible errors: 400, 401, 403, 404, 429
 Admin only
 
 
-`status`: REVIEWED or DISMISSED. `action` (optional): NONE, REMOVE_CONTENT (removes the reported post, comment, listing or group) or DEACTIVATE_USER (the owner of the content, or the reported user). Other open reports about the same item are closed too.
+`status`: REVIEWED or DISMISSED. `action` (optional): NONE, REMOVE_CONTENT (removes the reported post, comment, listing, group, opportunity, event or PPA review) or DEACTIVATE_USER (the owner of the content, or the reported user). Other open reports about the same item are closed too.
 
 
 Path: `id`
@@ -1849,6 +2428,250 @@ Possible errors: 400, 401, 403, 404, 429
 
 **Delete any explore tip**  
 Admin only
+
+
+Path: `id`
+
+
+Body (JSON):
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `reason` | string (up to 500 chars) | no |  |
+
+Possible errors: 400, 401, 403, 404, 429
+
+
+### GET /admin/opportunities
+
+**Search opportunities (status=PENDING is the approval queue)**  
+Admin only
+
+
+`status=PENDING` lists the approval queue oldest first. Other filters: `type`, `postedById`, `q`. Includes the poster's email.
+
+
+| Query | Type | Required | Notes |
+|---|---|---|---|
+| `status` | one of: PENDING, OPEN, CLOSED, REJECTED, REMOVED | no |  |
+| `type` | one of: JOB, INTERNSHIP, FREELANCE, SCHOLARSHIP, GRANT, TRAINING, COMPETITION, BUSINESS, NETWORKING, OTHER | no |  |
+| `postedById` | string | no |  |
+| `q` | string (up to 80 chars) | no |  |
+| `cursor` | string (up to 200 chars) | no |  |
+| `pageSize` | number (1 to 50) | no |  |
+
+Possible errors: 400, 401, 403, 429
+
+
+### GET /admin/opportunities/{id}
+
+**One opportunity (admin view)**  
+Admin only
+
+
+Path: `id`
+
+
+Possible errors: 400, 401, 403, 404, 429
+
+
+### PATCH /admin/opportunities/{id}/decision
+
+**Approve or reject a pending opportunity**  
+Admin only
+
+
+Body `{ "decision": "APPROVE" }` or `{ "decision": "REJECT", "reason": "..." }`. Only pending posts can be decided, once. The poster gets a notification and the reason is shown to them.
+
+
+Path: `id`
+
+
+Body (JSON):
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `decision` | one of: APPROVE, REJECT | yes |  |
+| `reason` | string (up to 500 chars) | no |  |
+
+Possible errors: 400, 401, 403, 404, 429
+
+
+### PATCH /admin/opportunities/{id}/remove
+
+**Remove an opportunity (a reason is required, the poster sees it)**  
+Admin only
+
+
+Body `{ "reason": "..." }` (required). The poster is told. The record is kept.
+
+
+Path: `id`
+
+
+Body (JSON):
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `reason` | string (3 to 500 chars) | yes |  |
+
+Possible errors: 400, 401, 403, 404, 429
+
+
+### PATCH /admin/opportunities/{id}/restore
+
+**Put a removed opportunity back**  
+Admin only
+
+
+Puts a removed opportunity back live (this counts as approving it).
+
+
+Path: `id`
+
+
+Body (JSON):
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `reason` | string (up to 500 chars) | no |  |
+
+Possible errors: 400, 401, 403, 404, 429
+
+
+### GET /admin/events
+
+**Search events (status=PENDING is the approval queue)**  
+Admin only
+
+
+`status=PENDING` lists the approval queue oldest first. Other filters: `category`, `createdById`, `q`. Includes the organizer's email.
+
+
+| Query | Type | Required | Notes |
+|---|---|---|---|
+| `status` | one of: PENDING, PUBLISHED, REJECTED, CANCELLED, REMOVED | no |  |
+| `category` | one of: MEETUP, NYSC_EVENT, NETWORKING, TECH, BUSINESS, SOCIAL, TRAINING, CAREER | no |  |
+| `createdById` | string | no |  |
+| `q` | string (up to 80 chars) | no |  |
+| `cursor` | string (up to 200 chars) | no |  |
+| `pageSize` | number (1 to 50) | no |  |
+
+Possible errors: 400, 401, 403, 429
+
+
+### GET /admin/events/{id}
+
+**One event (admin view)**  
+Admin only
+
+
+Path: `id`
+
+
+Possible errors: 400, 401, 403, 404, 429
+
+
+### PATCH /admin/events/{id}/decision
+
+**Approve or reject a pending event**  
+Admin only
+
+
+Body `{ "decision": "APPROVE" }` or `{ "decision": "REJECT", "reason": "..." }`. Only pending events can be decided, once. An event that has already ended cannot be approved.
+
+
+Path: `id`
+
+
+Body (JSON):
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `decision` | one of: APPROVE, REJECT | yes |  |
+| `reason` | string (up to 500 chars) | no |  |
+
+Possible errors: 400, 401, 403, 404, 429
+
+
+### PATCH /admin/events/{id}/remove
+
+**Remove an event (a reason is required, the organizer sees it)**  
+Admin only
+
+
+Body `{ "reason": "..." }` (required). The organizer is told, and so is everyone going to a live event.
+
+
+Path: `id`
+
+
+Body (JSON):
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `reason` | string (3 to 500 chars) | yes |  |
+
+Possible errors: 400, 401, 403, 404, 429
+
+
+### PATCH /admin/events/{id}/restore
+
+**Put a removed event back**  
+Admin only
+
+
+Puts a removed event back live (this counts as approving it).
+
+
+Path: `id`
+
+
+Body (JSON):
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `reason` | string (up to 500 chars) | no |  |
+
+Possible errors: 400, 401, 403, 404, 429
+
+
+### GET /admin/ppa-reviews
+
+**Search PPA reviews (the author is shown, even when anonymous)**  
+Admin only
+
+
+| Query | Type | Required | Notes |
+|---|---|---|---|
+| `cursor` | string (up to 200 chars) | no |  |
+| `pageSize` | number (1 to 50) | no |  |
+| `ppaId` | string | no |  |
+| `authorId` | string | no |  |
+| `q` | string (up to 80 chars) | no |  |
+
+Possible errors: 400, 401, 403, 429
+
+
+### GET /admin/ppa-reviews/{id}
+
+**One PPA review with its author**  
+Admin only
+
+
+Path: `id`
+
+
+Possible errors: 400, 401, 403, 404, 429
+
+
+### DELETE /admin/ppa-reviews/{id}
+
+**Delete a PPA review (the author is told)**  
+Admin only
+
+
+Optional body `{ "reason": "..." }`. The PPA totals are updated and the author is told. Written to the audit log.
 
 
 Path: `id`
